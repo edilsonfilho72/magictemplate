@@ -6,13 +6,17 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
+
+concurrency:
+  group: magictemplate-build-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   build:
     name: Build
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     defaults:
       run:
         shell: bash
@@ -25,56 +29,161 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+          registry-url: https://registry.npmjs.org
 
-      - name: Instalar dependências
+      - name: Preparar resolução inicial com metadados oficiais
+        id: prepare
         run: |
+          set -euo pipefail
           node --version
           npm --version
           if [ -f package-lock.json ]; then
-            echo 'Lockfile encontrado: usando npm ci.'
-            npm ci
+            echo 'bootstrap=false' >> "$GITHUB_OUTPUT"
+            echo 'Lockfile versionado encontrado; nenhuma versão será recalculada.'
           else
-            echo 'Sem package-lock.json: usando npm install.'
-            npm install
+            echo 'bootstrap=true' >> "$GITHUB_OUTPUT"
+            node scripts/prepare-tanstack-lock.mjs 2>&1 | tee dependency-preparation.log
           fi
 
-      - name: Compilar e verificar TypeScript
+      - name: Instalar exclusivamente pelo lockfile
+        id: install
+        run: |
+          set -euo pipefail
+          npm ci --strict-peer-deps 2>&1 | tee install.log
+          git diff --exit-code -- src
+
+      - name: Registrar resoluções TanStack e verificar exports
+        id: dependencies
+        run: |
+          set -euo pipefail
+          npm ls @tanstack/react-router @tanstack/router-plugin @tanstack/router-generator @tanstack/router-core @tanstack/router-utils --all 2>&1 | tee tanstack-versions.log
+          node --input-type=module <<'NODE' 2>&1 | tee tanstack-exports.log
+          import { readFileSync } from 'node:fs';
+          const lock = JSON.parse(readFileSync('package-lock.json', 'utf8'));
+          for (const [path, entry] of Object.entries(lock.packages)) {
+            if (path.includes('node_modules/@tanstack/')) {
+              console.log(JSON.stringify({ path, version: entry.version, dependencies: entry.dependencies, peerDependencies: entry.peerDependencies }));
+            }
+          }
+          const generator = await import('@tanstack/router-generator');
+          console.log('Exports do generator instalado:', Object.keys(generator).sort());
+          if (typeof generator.generator !== 'function') {
+            throw new Error('O generator instalado não exporta a função generator exigida pelo plugin.');
+          }
+          const plugin = await import('@tanstack/router-plugin/vite');
+          console.log('Exports do plugin Vite:', Object.keys(plugin).sort());
+          if (typeof plugin.TanStackRouterVite !== 'function') {
+            throw new Error('A API TanStackRouterVite utilizada pelo projeto não está disponível.');
+          }
+          NODE
+
+      - name: Verificar carregamento de vite.config.ts
+        id: config
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE' 2>&1 | tee vite-config.log
+          import { loadConfigFromFile } from 'vite';
+          const config = await loadConfigFromFile({ command: 'build', mode: 'production' });
+          if (!config) throw new Error('Configuração Vite não carregada.');
+          console.log('Configuração carregada:', config.path);
+          NODE
+
+      - name: Gerar rotas e compilar com Vite
+        id: vite
+        run: |
+          set -euo pipefail
+          if git ls-files --error-unmatch src/routeTree.gen.ts >/dev/null 2>&1; then
+            echo '::error::A árvore gerada não deve ser versionada por este workflow.'
+            exit 1
+          fi
+          test ! -e src/routeTree.gen.ts
+          npm exec -- vite build 2>&1 | tee vite-build.log
+
+      - name: Confirmar geração automática das três rotas
+        id: routes
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE' 2>&1 | tee routes.log
+          import { readFileSync } from 'node:fs';
+          const tree = readFileSync('src/routeTree.gen.ts', 'utf8');
+          if (!tree.trim()) throw new Error('Árvore gerada vazia.');
+          for (const route of ['/', '/templates', '/configuracoes']) {
+            if (!tree.includes(`'${route}'`) && !tree.includes(JSON.stringify(route))) {
+              throw new Error(`Rota não encontrada na árvore gerada: ${route}`);
+            }
+          }
+          console.log('Árvore gerada pelo plugin contém /, /templates e /configuracoes.');
+          NODE
+
+      - name: Verificar TypeScript
+        id: types
+        run: |
+          set -euo pipefail
+          npm exec -- tsc --noEmit 2>&1 | tee typescript.log
+
+      - name: Executar script completo de build
         id: build
         run: |
           set -euo pipefail
           npm run build 2>&1 | tee build.log
-          echo 'npm run build concluído: vite build e tsc --noEmit finalizaram com sucesso.'
 
-      - name: Verificar árvore de rotas gerada automaticamente
-        id: routes
-        if: ${{ always() && (steps.build.outcome == 'success' || steps.build.outcome == 'failure') }}
+      - name: Versionar somente dependências validadas e lockfile
+        id: persist
+        if: ${{ success() && steps.prepare.outputs.bootstrap == 'true' && github.ref == 'refs/heads/main' }}
         run: |
-          if [ ! -s src/routeTree.gen.ts ]; then
-            echo '::error::src/routeTree.gen.ts não foi gerado ou está vazio.'
-            exit 1
-          fi
-          echo 'Verificado: src/routeTree.gen.ts existe e não está vazio após a execução do build.'
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- package.json package-lock.json
+          git commit -m 'Fixe o generator compatível e versione o lockfile validado'
+          git push origin HEAD:main
+          echo 'Dependências e lockfile publicados após build bem-sucedido.'
 
-      - name: Disponibilizar log da compilação
+      - name: Disponibilizar diagnósticos e resolução
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
-          name: build-log
-          path: build.log
-          if-no-files-found: ignore
+          name: build-diagnostics
+          path: |
+            *.log
+            tanstack-metadata.json
+            package.json
+            package-lock.json
+          if-no-files-found: warn
           retention-days: 14
 
-      - name: Registrar resultados
+      - name: Registrar resultados reais
         if: ${{ always() }}
         env:
-          BUILD_RESULT: ${{ steps.build.outcome }}
+          PREPARE_RESULT: ${{ steps.prepare.outcome }}
+          INSTALL_RESULT: ${{ steps.install.outcome }}
+          DEPENDENCIES_RESULT: ${{ steps.dependencies.outcome }}
+          CONFIG_RESULT: ${{ steps.config.outcome }}
+          VITE_RESULT: ${{ steps.vite.outcome }}
           ROUTES_RESULT: ${{ steps.routes.outcome }}
+          TYPES_RESULT: ${{ steps.types.outcome }}
+          BUILD_RESULT: ${{ steps.build.outcome }}
+          PERSIST_RESULT: ${{ steps.persist.outcome }}
+          BOOTSTRAP: ${{ steps.prepare.outputs.bootstrap }}
         run: |
           {
             echo '## MAGICtemplate — resultados'
-            echo "- Compilação e TypeScript: ${BUILD_RESULT}"
-            echo "- Arquivo de rotas gerado: ${ROUTES_RESULT}"
-            echo '- Script configurado: vite build && tsc --noEmit.'
-            echo '- TypeScript só é executado após o sucesso do Vite.'
-            echo '- Consulte os logs das etapas para detalhes e o artefato build-log para a saída da compilação, quando disponível.'
+            echo "- Preparação: ${PREPARE_RESULT}"
+            echo "- npm ci: ${INSTALL_RESULT}"
+            echo "- Dependências e exports: ${DEPENDENCIES_RESULT}"
+            echo "- Carregamento da configuração Vite: ${CONFIG_RESULT}"
+            echo "- Compilação Vite: ${VITE_RESULT}"
+            echo "- Geração automática e presença das três rotas: ${ROUTES_RESULT}"
+            echo "- TypeScript: ${TYPES_RESULT}"
+            echo "- npm run build: ${BUILD_RESULT}"
+            if [ "$BOOTSTRAP" = 'true' ]; then
+              echo "- Publicação inicial de package.json e package-lock.json: ${PERSIST_RESULT}"
+              if [ "$PERSIST_RESULT" != 'success' ]; then
+                echo '- O lockfile inicial ainda não foi confirmado no repositório. Consulte a primeira etapa que falhou; proteção da branch também pode impedir a publicação.'
+              fi
+            else
+              echo '- Instalação baseada no lockfile já versionado.'
+            fi
+            echo '- Metadados, versões resolvidas, exports e logs estão no artefato build-diagnostics.'
+            echo '- Nenhum arquivo de rota gerado é criado manualmente ou incluído no commit.'
           } >> "$GITHUB_STEP_SUMMARY"
