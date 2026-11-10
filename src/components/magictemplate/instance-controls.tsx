@@ -68,6 +68,8 @@ export function InstanceWorkspaceControls({ id, disabled = false, onChange }: {
 
   return <div className="space-y-4 text-foreground">
     <InstanceSelector id={id} instances={workspace.instances} value={workspace.selection?.instanceId ?? ''} loading={workspace.loading} disabled={disabled || !ready} onChange={onChange ?? workspace.selectInstance} />
+    {workspace.client && !workspace.loading && !workspace.userId && <Notice>Nenhuma sessão autenticada foi confirmada. Entre na sua conta para carregar e criar instâncias. Se já entrou, confira o diagnóstico de conexão abaixo.</Notice>}
+    {workspace.userId && workspace.error && <Notice>A sessão foi identificada, mas a leitura das instâncias ou de seus templates falhou. Confira o erro abaixo e tente novamente; esta falha não significa que sua conta esteja sem instâncias.</Notice>}
     <div aria-live="polite" className="rounded-xl border border-slate-200 bg-background px-4 py-3">
       {selected ? <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="min-w-0 break-words text-sm text-slate-700">Instância selecionada: <span className="font-semibold text-slate-900">{selected.name}</span></p>
@@ -121,9 +123,17 @@ export function useInstanceWorkspace(client: SupabaseClient) {
       persistenceWarning: '',
     }));
 
+    let authenticatedUserId = '';
     try {
+      // Separar a identidade da sessão do resultado das consultas ao banco.
+      const { data, error } = await client.auth.getSession();
+      if (ticket !== generation.current) return;
+      if (error) throw error;
+      authenticatedUserId = data.session?.user.id ?? '';
+      if (!authenticatedUserId) throw new Error('Entre na sua conta para acessar instâncias e templates.');
       const result = await loadInstances(client);
       if (ticket !== generation.current) return;
+      if (result.userId !== authenticatedUserId) throw new Error('A conta foi alterada. Atualize as instâncias novamente.');
       let persistenceWarning = '';
       let candidate = '';
       if (preferred.current?.userId === result.userId) {
@@ -167,32 +177,39 @@ export function useInstanceWorkspace(client: SupabaseClient) {
       });
     } catch (error) {
       if (ticket !== generation.current) return;
-      setState({ ...emptyWorkspace(), error: errorMessage(error) });
+      // Uma falha de leitura não equivale a sair da conta. Limpar os dados
+      // impede usar resultados antigos, sem apagar a identidade confirmada.
+      setState({ ...emptyWorkspace(), userId: authenticatedUserId, error: errorMessage(error) });
     }
   }, [client]);
 
   useEffect(() => {
     let active = true;
+    let refreshTimer: ReturnType<typeof setTimeout> | undefined;
     owner.current = null;
     preferred.current = null;
     const { data } = client.auth.onAuthStateChange((_event, session) => {
       const nextOwner = session?.user.id ?? '';
       if (nextOwner === owner.current) return;
+      if (refreshTimer !== undefined) clearTimeout(refreshTimer);
       owner.current = nextOwner;
       preferred.current = null;
       generation.current += 1;
       setState({
         ...emptyWorkspace(!!nextOwner),
+        userId: nextOwner,
         error: nextOwner ? '' : 'Entre na sua conta para acessar instâncias e templates.',
       });
-      // Não executar chamadas Supabase dentro do callback síncrono de autenticação.
-      if (nextOwner) queueMicrotask(() => {
-        if (active) void refresh();
-      });
+      // A próxima tarefa permite concluir o callback de autenticação antes
+      // de executar getSession novamente nas leituras do workspace.
+      if (nextOwner) refreshTimer = setTimeout(() => {
+        if (active && owner.current === nextOwner) void refresh();
+      }, 0);
     });
     void refresh();
     return () => {
       active = false;
+      if (refreshTimer !== undefined) clearTimeout(refreshTimer);
       generation.current += 1;
       data.subscription.unsubscribe();
     };
