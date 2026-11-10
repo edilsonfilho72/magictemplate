@@ -1,5 +1,6 @@
 import { createRootRoute, Link, Outlet } from '@tanstack/react-router';
 import { InstanceWorkspaceProvider } from '../components/magictemplate/instance-controls';
+import { supabase, supabaseConfigurationError } from '../integrations/supabase/client';
 
 export const Route = createRootRoute({
   component: Root,
@@ -7,9 +8,7 @@ export const Route = createRootRoute({
 });
 
 function Root() {
-  // Falta vincular a exportação do cliente Supabase existente à prop client.
-  // Sem esse cliente, o provider bloqueia operações e exibe a pendência nas telas.
-  return <InstanceWorkspaceProvider><Outlet /></InstanceWorkspaceProvider>;
+  return <InstanceWorkspaceProvider client={supabase} configurationError={supabaseConfigurationError}><Outlet /></InstanceWorkspaceProvider>;
 }
 
 function NotFound() {

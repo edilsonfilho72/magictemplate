@@ -194,13 +194,17 @@ function ConnectedInstanceWorkspace({ client, children }: {
   return <InstanceWorkspaceContext.Provider value={{ ...workspace, client }}>{children}</InstanceWorkspaceContext.Provider>;
 }
 
-// Vincular aqui o singleton já utilizado pelo projeto, sem criar outra conexão.
-export function InstanceWorkspaceProvider({ client, children }: {
+// O cliente único é fornecido pela raiz; a sessão é acompanhada pelo workspace.
+export function InstanceWorkspaceProvider({ client, configurationError, children }: {
   client?: SupabaseClient | null;
+  configurationError?: string;
   children: ReactNode;
 }) {
   if (client) return <ConnectedInstanceWorkspace client={client}>{children}</ConnectedInstanceWorkspace>;
-  return <InstanceWorkspaceContext.Provider value={unavailableWorkspace}>{children}</InstanceWorkspaceContext.Provider>;
+  return <InstanceWorkspaceContext.Provider value={{
+    ...unavailableWorkspace,
+    error: configurationError || unavailableWorkspace.error,
+  }}>{children}</InstanceWorkspaceContext.Provider>;
 }
 
 export function useSharedInstanceWorkspace() {
