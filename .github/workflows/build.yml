@@ -1,0 +1,80 @@
+name: Build MAGICtemplate
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Obter código
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Instalar dependências
+        run: |
+          node --version
+          npm --version
+          if [ -f package-lock.json ]; then
+            echo 'Lockfile encontrado: usando npm ci.'
+            npm ci
+          else
+            echo 'Sem package-lock.json: usando npm install.'
+            npm install
+          fi
+
+      - name: Compilar e verificar TypeScript
+        id: build
+        run: |
+          set -euo pipefail
+          npm run build 2>&1 | tee build.log
+          echo 'npm run build concluído: vite build e tsc --noEmit finalizaram com sucesso.'
+
+      - name: Verificar árvore de rotas gerada automaticamente
+        id: routes
+        if: ${{ always() && (steps.build.outcome == 'success' || steps.build.outcome == 'failure') }}
+        run: |
+          if [ ! -s src/routeTree.gen.ts ]; then
+            echo '::error::src/routeTree.gen.ts não foi gerado ou está vazio.'
+            exit 1
+          fi
+          echo 'Verificado: src/routeTree.gen.ts existe e não está vazio após a execução do build.'
+
+      - name: Disponibilizar log da compilação
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Registrar resultados
+        if: ${{ always() }}
+        env:
+          BUILD_RESULT: ${{ steps.build.outcome }}
+          ROUTES_RESULT: ${{ steps.routes.outcome }}
+        run: |
+          {
+            echo '## MAGICtemplate — resultados'
+            echo "- Compilação e TypeScript: ${BUILD_RESULT}"
+            echo "- Arquivo de rotas gerado: ${ROUTES_RESULT}"
+            echo '- Script configurado: vite build && tsc --noEmit.'
+            echo '- TypeScript só é executado após o sucesso do Vite.'
+            echo '- Consulte os logs das etapas para detalhes e o artefato build-log para a saída da compilação, quando disponível.'
+          } >> "$GITHUB_STEP_SUMMARY"
