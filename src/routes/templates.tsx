@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 import { createFileRoute } from '@tanstack/react-router';
 import { MagicLayout } from '../components/magictemplate/layout';
-import { InstanceManager, InstanceSelector, useSharedInstanceWorkspace } from '../components/magictemplate/instance-controls';
+import { InstanceWorkspaceControls, useSharedInstanceWorkspace } from '../components/magictemplate/instance-controls';
 import { CommittedWriteError, deleteInstanceTemplate, importInstanceTemplates, loadTemplateLibrary, removeTemplateAssociation, saveInstanceTemplate, type InstanceTemplate } from '../components/magictemplate/instance-data';
 import { TemplateAvailability, resolveAvailability, type TemplateAvailabilityValue } from '../components/magictemplate/template-availability';
 import { MagicModal } from '../components/ui/magic-modal';
@@ -156,10 +156,7 @@ function TemplatesContent({ workspace }: { workspace: ReturnType<typeof useShare
     <PageHeader title="Gerenciar Templates" description="Uma biblioteca por conta. Cadastre uma vez e associe seus templates às instâncias desejadas." actions={<><Button variant="secondary" disabled={!canWrite} onClick={() => { setImportAvailability({ mode: 'specific', ids: selection ? [selection.instanceId] : [] }); setImporting(true); }}><Icon name="upload" />Importar</Button><Button disabled={!canWrite} onClick={() => openEditor()}><Icon name="plus" />Adicionar Template</Button></>} />
     <section aria-labelledby="templates-instance-title" className="mb-6 space-y-4 rounded-2xl border border-blue-100 bg-white p-5 shadow-sm sm:p-6">
       <div className="flex items-center gap-3"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600"><Icon name="template" /></span><div><h2 id="templates-instance-title" className="text-base font-semibold text-slate-900">Instâncias</h2><p className="mt-1 text-sm text-slate-500">A seleção prepara Gerar Mensagem e sugere a disponibilidade de novos templates. A biblioteca abaixo sempre mostra todos os seus templates.</p></div></div>
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
-        <InstanceSelector id="templates-instance" instances={workspace.instances} value={selection?.instanceId ?? ''} loading={workspace.loading} disabled={pending || !client || !workspace.userId} onChange={workspace.selectInstance} />
-        {client && workspace.userId && <InstanceManager client={client} onChanged={() => void workspace.refresh()} />}
-      </div>
+      <InstanceWorkspaceControls id="templates-instance" disabled={pending} />
       {workspace.error && <Notice tone="error">{workspace.error}</Notice>}
       {workspace.persistenceWarning && <Notice>{workspace.persistenceWarning}</Notice>}
       {client && workspace.error && <Button variant="secondary" disabled={loading} onClick={() => void workspace.refresh()}>Tentar novamente</Button>}

@@ -56,6 +56,30 @@ export function InstanceSelector({
   </div>;
 }
 
+export function InstanceWorkspaceControls({ id, disabled = false, onChange }: {
+  id: string;
+  disabled?: boolean;
+  onChange?: (instanceId: string) => void;
+}) {
+  const workspace = useSharedInstanceWorkspace();
+  const ready = !!workspace.client && !!workspace.userId && !workspace.loading && !workspace.error;
+  const selected = ready ? workspace.instances.find(instance =>
+    instance.id === workspace.selection?.instanceId && instance.user_id === workspace.userId) : undefined;
+
+  return <div className="space-y-4 text-foreground">
+    <InstanceSelector id={id} instances={workspace.instances} value={workspace.selection?.instanceId ?? ''} loading={workspace.loading} disabled={disabled || !ready} onChange={onChange ?? workspace.selectInstance} />
+    <div aria-live="polite" className="rounded-xl border border-slate-200 bg-background px-4 py-3">
+      {selected ? <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="min-w-0 break-words text-sm text-slate-700">Instância selecionada: <span className="font-semibold text-slate-900">{selected.name}</span></p>
+        <span className="rounded-full bg-blue-50 px-3 py-1 text-sm font-semibold text-blue-700">{selected.templateCount} {selected.templateCount === 1 ? 'template disponível' : 'templates disponíveis'}</span>
+      </div> : <p className="text-sm text-slate-500">{workspace.loading ? 'Consultando instâncias e disponibilidade…' : !ready ? 'Seleção indisponível. Confira o diagnóstico de sessão e conexão abaixo.' : 'Nenhuma instância selecionada.'}</p>}
+    </div>
+    {workspace.client
+      ? <InstanceManager client={workspace.client} onChanged={() => void workspace.refresh()} disabled={disabled || workspace.loading} showEmptyState={ready && workspace.instances.length === 0} />
+      : <Button variant="secondary" disabled>Gerenciar instâncias</Button>}
+  </div>;
+}
+
 function errorMessage(error: unknown) {
   if (error instanceof Error) return error.message;
   if (typeof error === 'object' && error !== null && 'message' in error && typeof error.message === 'string') return error.message;
@@ -228,9 +252,11 @@ export function useSharedInstanceWorkspace() {
   return workspace;
 }
 
-export function InstanceManager({ client, onChanged }: {
+export function InstanceManager({ client, onChanged, disabled = false, showEmptyState = false }: {
   client: SupabaseClient;
   onChanged: () => void;
+  disabled?: boolean;
+  showEmptyState?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [instances, setInstances] = useState<InstanceWithCount[]>([]);
@@ -364,8 +390,11 @@ export function InstanceManager({ client, onChanged }: {
 
   const deleting = instances.find(instance => instance.id === deletingId);
 
-  return <div className="text-foreground">
-    <Button variant="secondary" onClick={() => void showManager()} disabled={open}>Gerenciar instâncias</Button>
+  return <div className="space-y-4 text-foreground">
+    <Button variant="secondary" onClick={() => void showManager()} disabled={disabled || open}>Gerenciar instâncias</Button>
+    {showEmptyState && <EmptyState title="Nenhuma instância cadastrada" description="Crie sua primeira instância para disponibilizar templates em Gerar Mensagem. Não é necessário ter templates na biblioteca para começar.">
+      <Button onClick={() => void showManager()} disabled={disabled || open}>Criar primeira instância</Button>
+    </EmptyState>}
     {open && <MagicModal labelledBy="magic-instances-title" onClose={close}>
       <section aria-busy={busy} className="space-y-5 rounded-xl bg-background p-1 sm:p-2">
         <div className="flex items-start justify-between gap-4">
