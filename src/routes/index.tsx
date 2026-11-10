@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { createFileRoute } from '@tanstack/react-router';
 import { MagicLayout } from '../components/magictemplate/layout';
+import { useTemporaryTemplates } from '../components/magictemplate/temporary-templates';
 import { VariableResults } from '../components/magictemplate/variable-results';
 import { Button, Icon, Notice, PageHeader, Textarea } from '../components/ui/magic-ui';
 
@@ -9,9 +10,26 @@ export const Route = createFileRoute('/')({ component: GeneratePage });
 function GeneratePage() {
   const [mode, setMode] = useState<'idea' | 'message'>('idea');
   const [drafts, setDrafts] = useState({ idea: '', message: '' });
+  const { templates } = useTemporaryTemplates();
+  const [selectedId, setSelectedId] = useState('');
+  const [complements, setComplements] = useState<Record<string, string>>({});
+  const selected = templates.find(item => item.id === selectedId);
+  const variables = selected ? [...new Set(Array.from(selected.conteudo.matchAll(/\{\{\s*(\d+)\s*\}\}/g), match => String(Number(match[1]))))] : [];
+  const items = variables.map(id => ({ id, value: complements[id] ?? '' }));
 
   return <MagicLayout active="/">
     <PageHeader title="Gerar Mensagem" description="Transforme sua intenção em complementos para cada variável do seu template." />
+    <section aria-label="Seleção de template" className="mb-6 space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+      <div>
+        <label htmlFor="magic-template" className="mb-2 block text-sm font-medium text-slate-700">Template temporário</label>
+        <select id="magic-template" value={selectedId} onChange={event => { setSelectedId(event.target.value); setComplements({}); }} className="min-h-11 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100">
+          <option value="">Selecione um template</option>
+          {templates.map(item => <option key={item.id} value={item.id}>{item.nome || 'Template sem nome'}</option>)}
+        </select>
+      </div>
+      <Notice>{templates.length ? 'Preencha manualmente os complementos do template selecionado. Nenhum conteúdo é gerado automaticamente ou salvo no banco. Trocar o template limpa os complementos.' : 'Adicione ou importe um template na tela Templates para preencher seus complementos manualmente. Os dados são temporários e não são salvos no banco.'}</Notice>
+      {selected && <div className="rounded-xl bg-slate-50 p-4"><h2 className="text-sm font-semibold text-slate-700">Texto do template</h2><p className="mt-2 whitespace-pre-wrap break-words text-sm leading-relaxed text-slate-500">{selected.conteudo}</p>{variables.length === 0 && <p className="mt-3 text-xs text-slate-500">Este template não contém variáveis numéricas para preencher.</p>}</div>}
+    </section>
     <div className="grid items-start gap-6 xl:grid-cols-2">
       <section aria-labelledby="magic-input-title" className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
         <div className="mb-5 flex items-center gap-3"><span className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-50 text-blue-600"><Icon name="message" /></span><h2 id="magic-input-title" className="text-base font-semibold">O que você quer comunicar?</h2></div>
@@ -24,7 +42,7 @@ function GeneratePage() {
         <Button disabled className="mt-5 w-full" aria-describedby="magic-processing-note"><Icon name="spark" />Processar</Button>
         <div id="magic-processing-note" className="mt-4"><Notice>O processamento será disponibilizado em uma próxima etapa. Esta interface não envia seu texto e não gera respostas de demonstração.</Notice></div>
       </section>
-      <VariableResults items={[]} onChange={() => undefined} />
+      <VariableResults items={items} onChange={(id, value) => setComplements(current => ({ ...current, [id]: value }))} />
     </div>
     <div className="mt-6 flex items-start gap-3 rounded-xl border border-slate-200 bg-white px-5 py-4 text-sm text-slate-500"><span className="mt-0.5 text-blue-500"><Icon name="template" /></span><p className="leading-relaxed">Textos fixos permanecem no template. Cada complemento será apresentado separadamente, com edição e cópia individuais.</p></div>
   </MagicLayout>;

@@ -39,7 +39,7 @@ export function VariableResults({ items, onChange, status = 'idle', error }: Pro
     <div className="mb-5 flex flex-wrap items-center justify-between gap-2"><h2 id="magic-results-title" className="text-base font-semibold text-slate-900">Complementos</h2><span className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-500">Uma seção por variável</span></div>
     {status === 'loading' ? <div className="space-y-4"><Notice tone="loading">Processando os complementos…</Notice>{[0, 1].map(key => <div key={key} aria-hidden="true" className="h-32 animate-pulse rounded-xl bg-slate-100 motion-reduce:animate-none" />)}</div>
       : status === 'error' ? <Notice tone="error">{error || 'Não foi possível processar os complementos. Tente novamente.'}</Notice>
-      : items.length > 0 ? <div className="space-y-4"><Notice tone="success">Complementos disponíveis. Edite e copie cada variável individualmente.</Notice>{items.map(item => <VariableSection key={item.id} item={item} onChange={onChange} />)}</div>
+      : items.length > 0 ? <div className="space-y-4"><Notice>Preencha ou edite cada complemento e copie individualmente. Estes campos não são respostas geradas automaticamente.</Notice>{items.map(item => <VariableSection key={item.id} item={item} onChange={onChange} />)}</div>
       : <EmptyState title="Seus complementos aparecerão aqui" description="Cada variável terá seu próprio campo editável e botão de copiar. Nenhum resultado foi gerado." />}
   </section>;
 }
