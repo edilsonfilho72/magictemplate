@@ -110,7 +110,8 @@ function TemplatesContent({ workspace }: { workspace: ReturnType<typeof useShare
 
   return <MagicLayout active="/templates">
     <PageHeader title="Gerenciar Templates" description="Organize os textos fixos e as variáveis das suas mensagens." actions={<><Button variant="secondary" disabled={!canWrite} onClick={() => fileInput.current?.click()}><Icon name="upload" />Importar</Button><Button disabled={!canWrite} onClick={() => openEditor()}><Icon name="plus" />Adicionar Template</Button></>} />
-    <section aria-label="Instâncias" className="mb-6 space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+    <section aria-labelledby="templates-instance-title" className="mb-6 space-y-4 rounded-2xl border border-blue-100 bg-white p-5 shadow-sm sm:p-6">
+      <div className="flex items-center gap-3"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600"><Icon name="template" /></span><div><h2 id="templates-instance-title" className="text-base font-semibold text-slate-900">Instâncias</h2><p className="mt-1 text-sm text-slate-500">Selecione o contexto dos templates que deseja gerenciar.</p></div></div>
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
         <InstanceSelector id="templates-instance" instances={workspace.instances} value={selection?.instanceId ?? ''} loading={workspace.loading} disabled={pending || !client || !workspace.userId} onChange={workspace.selectInstance} />
         {client && workspace.userId && !loading && <InstanceManager client={client} onChanged={() => void workspace.refresh()} />}

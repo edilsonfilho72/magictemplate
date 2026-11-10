@@ -25,7 +25,8 @@ function GenerateContent({ workspace }: { workspace: ReturnType<typeof useShared
 
   return <MagicLayout active="/">
     <PageHeader title="Gerar Mensagem" description="Transforme sua intenção em complementos para cada variável do seu template." />
-    <section aria-label="Seleção de template" className="mb-6 space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+    <section aria-labelledby="generate-instance-title" className="mb-6 space-y-4 rounded-2xl border border-blue-100 bg-white p-5 shadow-sm sm:p-6">
+      <div className="flex items-center gap-3"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600"><Icon name="template" /></span><div><h2 id="generate-instance-title" className="text-base font-semibold text-slate-900">Instância e template</h2><p className="mt-1 text-sm text-slate-500">Escolha a instância antes de selecionar o template da mensagem.</p></div></div>
       <InstanceSelector id="generate-instance" instances={instances} value={selection?.instanceId ?? ''} loading={loading} disabled={!workspace.client || !workspace.userId} onChange={id => { setSelectedId(''); setComplements({}); setDrafts({ idea: '', message: '' }); selectInstance(id); }} />
       {error && <Notice tone="error">{error}</Notice>}
       {persistenceWarning && <Notice>{persistenceWarning}</Notice>}

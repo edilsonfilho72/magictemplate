@@ -28,16 +28,29 @@ export function InstanceSelector({
   loading?: boolean;
   disabled?: boolean;
 }) {
+  const workspace = useSharedInstanceWorkspace();
   const selected = instances.some(instance => instance.id === value) ? value : '';
-  return <div className="min-w-0 flex-1 text-foreground">
-    <label htmlFor={id} className="mb-2 block text-sm font-medium text-slate-700">Instância <span className="text-blue-600">*</span></label>
-    <select id={id} required value={selected} disabled={disabled || loading || !instances.length}
+  const placeholder = !workspace.client ? 'Conexão indisponível'
+    : loading ? 'Carregando instâncias…'
+    : workspace.error ? 'Não foi possível carregar as instâncias'
+    : !workspace.userId ? 'Sessão necessária'
+    : !instances.length ? 'Nenhuma instância disponível'
+    : 'Selecione uma instância';
+  const help = !workspace.client ? 'A configuração da conexão está indisponível. Consulte o diagnóstico abaixo.'
+    : loading ? 'Consultando as instâncias e seus templates no banco da sua conta.'
+    : workspace.error ? 'Consulte o aviso abaixo e use Verificar conexão e leitura para conferir a sessão e o acesso ao banco.'
+    : !workspace.userId ? 'Entre na sua conta para consultar suas instâncias reais.'
+    : !instances.length ? 'Nenhuma instância foi retornada para esta conta. Crie uma em Gerenciar instâncias, na tela Templates, ou verifique a conexão abaixo.'
+    : 'A seleção é compartilhada entre as duas telas. Somente os templates desta instância serão exibidos; o número indica a quantidade de templates.';
+  return <div className="w-full min-w-0 flex-1 text-foreground" aria-busy={loading}>
+    <label htmlFor={id} className="mb-2 block text-sm font-semibold text-slate-700">Instância <span className="text-blue-600">*</span></label>
+    <select id={id} required value={selected} disabled={disabled || loading || !workspace.client || !workspace.userId || !instances.length}
       onChange={event => onChange(event.target.value)} aria-describedby={`${id}-help`}
-      className="min-h-11 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400">
-      <option value="">{loading ? 'Carregando instâncias…' : 'Selecione uma instância'}</option>
+      className="min-h-11 w-full rounded-xl border border-blue-200 bg-white px-4 py-3 text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-600">
+      <option value="">{placeholder}</option>
       {instances.map(instance => <option key={instance.id} value={instance.id}>{instance.name} ({instance.templateCount})</option>)}
     </select>
-    <p id={`${id}-help`} className="mt-2 text-xs leading-relaxed text-slate-500">Somente os templates da instância selecionada devem ser usados nesta mensagem.</p>
+    <p id={`${id}-help`} aria-live="polite" className="mt-2 text-xs leading-relaxed text-slate-500">{help}</p>
   </div>;
 }
 
