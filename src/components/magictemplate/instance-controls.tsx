@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
+import { createContext, useContext, useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { MagicModal } from '../ui/magic-modal';
 import { Button, EmptyState, Input, Notice } from '../ui/magic-ui';
@@ -170,6 +170,43 @@ export function useInstanceWorkspace(client: SupabaseClient) {
   }, [state.loading, state.userId, state.instances, refresh]);
 
   return { ...state, selectInstance, refresh };
+}
+
+type SharedInstanceWorkspace = ReturnType<typeof useInstanceWorkspace> & {
+  client: SupabaseClient | null;
+};
+
+const InstanceWorkspaceContext = createContext<SharedInstanceWorkspace | null>(null);
+
+const unavailableWorkspace: SharedInstanceWorkspace = {
+  ...emptyWorkspace(),
+  client: null,
+  error: 'O cliente Supabase ainda não foi vinculado ao workspace de instâncias. As operações estão indisponíveis até essa integração ser concluída.',
+  selectInstance: () => {},
+  refresh: async () => {},
+};
+
+function ConnectedInstanceWorkspace({ client, children }: {
+  client: SupabaseClient;
+  children: ReactNode;
+}) {
+  const workspace = useInstanceWorkspace(client);
+  return <InstanceWorkspaceContext.Provider value={{ ...workspace, client }}>{children}</InstanceWorkspaceContext.Provider>;
+}
+
+// Vincular aqui o singleton já utilizado pelo projeto, sem criar outra conexão.
+export function InstanceWorkspaceProvider({ client, children }: {
+  client?: SupabaseClient | null;
+  children: ReactNode;
+}) {
+  if (client) return <ConnectedInstanceWorkspace client={client}>{children}</ConnectedInstanceWorkspace>;
+  return <InstanceWorkspaceContext.Provider value={unavailableWorkspace}>{children}</InstanceWorkspaceContext.Provider>;
+}
+
+export function useSharedInstanceWorkspace() {
+  const workspace = useContext(InstanceWorkspaceContext);
+  if (!workspace) throw new Error('Provider de instâncias não encontrado.');
+  return workspace;
 }
 
 export function InstanceManager({ client, onChanged }: {

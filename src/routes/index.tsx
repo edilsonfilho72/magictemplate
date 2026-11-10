@@ -1,16 +1,21 @@
 import { useState } from 'react';
 import { createFileRoute } from '@tanstack/react-router';
 import { MagicLayout } from '../components/magictemplate/layout';
-import { useTemporaryTemplates } from '../components/magictemplate/temporary-templates';
+import { InstanceSelector, useSharedInstanceWorkspace } from '../components/magictemplate/instance-controls';
 import { VariableResults } from '../components/magictemplate/variable-results';
 import { Button, Icon, Notice, PageHeader, Textarea } from '../components/ui/magic-ui';
 
 export const Route = createFileRoute('/')({ component: GeneratePage });
 
 function GeneratePage() {
+  const workspace = useSharedInstanceWorkspace();
+  return <GenerateContent key={`${workspace.userId}:${workspace.selection?.instanceId ?? ''}`} workspace={workspace} />;
+}
+
+function GenerateContent({ workspace }: { workspace: ReturnType<typeof useSharedInstanceWorkspace> }) {
   const [mode, setMode] = useState<'idea' | 'message'>('idea');
   const [drafts, setDrafts] = useState({ idea: '', message: '' });
-  const { templates } = useTemporaryTemplates();
+  const { templates, instances, selection, loading, error, persistenceWarning, selectInstance } = workspace;
   const [selectedId, setSelectedId] = useState('');
   const [complements, setComplements] = useState<Record<string, string>>({});
   const selected = templates.find(item => item.id === selectedId);
@@ -20,14 +25,18 @@ function GeneratePage() {
   return <MagicLayout active="/">
     <PageHeader title="Gerar Mensagem" description="Transforme sua intenção em complementos para cada variável do seu template." />
     <section aria-label="Seleção de template" className="mb-6 space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+      <InstanceSelector id="generate-instance" instances={instances} value={selection?.instanceId ?? ''} loading={loading} disabled={!workspace.client || !workspace.userId} onChange={id => { setSelectedId(''); setComplements({}); setDrafts({ idea: '', message: '' }); selectInstance(id); }} />
+      {error && <Notice tone="error">{error}</Notice>}
+      {persistenceWarning && <Notice>{persistenceWarning}</Notice>}
+      {workspace.client && error && <Button variant="secondary" disabled={loading} onClick={() => void workspace.refresh()}>Tentar novamente</Button>}
       <div>
-        <label htmlFor="magic-template" className="mb-2 block text-sm font-medium text-slate-700">Template temporário</label>
-        <select id="magic-template" value={selectedId} onChange={event => { setSelectedId(event.target.value); setComplements({}); }} className="min-h-11 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100">
+        <label htmlFor="magic-template" className="mb-2 block text-sm font-medium text-slate-700">Template</label>
+        <select id="magic-template" disabled={!selection || loading} value={selectedId} onChange={event => { setSelectedId(event.target.value); setComplements({}); }} className="min-h-11 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400">
           <option value="">Selecione um template</option>
           {templates.map(item => <option key={item.id} value={item.id}>{item.nome || 'Template sem nome'}</option>)}
         </select>
       </div>
-      <Notice>{templates.length ? 'Preencha manualmente os complementos do template selecionado. Nenhum conteúdo é gerado automaticamente ou salvo no banco. Trocar o template limpa os complementos.' : 'Adicione ou importe um template na tela Templates para preencher seus complementos manualmente. Os dados são temporários e não são salvos no banco.'}</Notice>
+      <Notice>{loading ? 'Carregando instâncias e templates…' : !selection ? 'Selecione uma instância para acessar seus templates. Crie e gerencie instâncias na tela Templates.' : templates.length ? 'Os templates são consultados no banco. Preencha os complementos manualmente; eles não são gerados nem salvos. Trocar a instância ou o template limpa os complementos.' : 'Esta instância ainda não possui templates. Adicione ou importe templates na tela Templates.'}</Notice>
       {selected && <div className="rounded-xl bg-slate-50 p-4"><h2 className="text-sm font-semibold text-slate-700">Texto do template</h2><p className="mt-2 whitespace-pre-wrap break-words text-sm leading-relaxed text-slate-500">{selected.conteudo}</p>{variables.length === 0 && <p className="mt-3 text-xs text-slate-500">Este template não contém variáveis numéricas para preencher.</p>}</div>}
     </section>
     <div className="grid items-start gap-6 xl:grid-cols-2">
@@ -42,7 +51,7 @@ function GeneratePage() {
         <Button disabled className="mt-5 w-full" aria-describedby="magic-processing-note"><Icon name="spark" />Processar</Button>
         <div id="magic-processing-note" className="mt-4"><Notice>O processamento será disponibilizado em uma próxima etapa. Esta interface não envia seu texto e não gera respostas de demonstração.</Notice></div>
       </section>
-      <VariableResults items={items} onChange={(id, value) => setComplements(current => ({ ...current, [id]: value }))} />
+      <VariableResults key={selectedId} items={items} onChange={(id, value) => setComplements(current => ({ ...current, [id]: value }))} />
     </div>
     <div className="mt-6 flex items-start gap-3 rounded-xl border border-slate-200 bg-white px-5 py-4 text-sm text-slate-500"><span className="mt-0.5 text-blue-500"><Icon name="template" /></span><p className="leading-relaxed">Textos fixos permanecem no template. Cada complemento será apresentado separadamente, com edição e cópia individuais.</p></div>
   </MagicLayout>;
