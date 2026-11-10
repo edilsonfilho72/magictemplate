@@ -41,6 +41,7 @@ function TemplatesContent({ workspace }: { workspace: ReturnType<typeof useShare
   const [feedback, setFeedback] = useState<Feedback | null>(null);
   const [pending, setPending] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [unlinking, setUnlinking] = useState<{ templateId: string; instanceId: string } | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const editorPanel = useRef<HTMLElement>(null);
   const active = useRef(true);
@@ -92,6 +93,7 @@ function TemplatesContent({ workspace }: { workspace: ReturnType<typeof useShare
     if (!canWrite || writing.current) return;
     writing.current = true;
     setPending(true);
+    setUnlinking(null);
     setFeedback(null);
     setFormError('');
     try {
@@ -185,6 +187,17 @@ function TemplatesContent({ workspace }: { workspace: ReturnType<typeof useShare
       <BackendConnectionCheck />
     </section>
     <input ref={fileInput} type="file" accept=".json,.txt,application/json,text/plain" className="hidden" aria-label="Importar templates em JSON ou TXT" onChange={importFile} />
+    {unlinking && <MagicModal labelledBy="magic-unlink-title" onClose={() => { if (!writing.current) setUnlinking(null); }}>
+      <section className="space-y-4 rounded-xl border border-blue-100 bg-background p-5 text-foreground">
+        <h2 id="magic-unlink-title" className="text-lg font-semibold">Remover esta associação?</h2>
+        <p className="text-sm leading-relaxed text-slate-600">O template <span className="font-semibold">{templates.find(item => item.id === unlinking.templateId)?.nome || 'Template sem nome'}</span> deixará de estar disponível em <span className="font-semibold">{workspace.instances.find(instance => instance.id === unlinking.instanceId)?.name || 'esta instância'}</span>. Ele continuará na biblioteca central e nas demais instâncias associadas.</p>
+        <Notice>Esta ação remove somente o vínculo. O conteúdo do template não será excluído.</Notice>
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button autoFocus variant="secondary" disabled={pending} onClick={() => setUnlinking(null)}>Cancelar</Button>
+          <Button disabled={!canWrite} onClick={() => unlink(unlinking.templateId, unlinking.instanceId)}>Confirmar remoção da associação</Button>
+        </div>
+      </section>
+    </MagicModal>}
     <div className="mb-6 space-y-3">
       <Notice>Biblioteca central da sua conta: editar um template atualiza o mesmo texto em todas as suas associações. Remover uma associação não exclui o template. A importação ignora IDs, proprietários e vínculos do arquivo.</Notice>
       <Notice>Cadastro e importação não exigem uma instância. Sem associações, o template permanece somente na biblioteca; sua disponibilidade em Gerar Mensagem depende dos vínculos selecionados.</Notice>
@@ -201,8 +214,8 @@ function TemplatesContent({ workspace }: { workspace: ReturnType<typeof useShare
     {editor && <MagicModal labelledBy="magic-editor-title" onClose={() => { if (!writing.current) { setEditor(null); setFormError(''); } }}><section ref={editorPanel} aria-labelledby="magic-editor-title" className="rounded-2xl border border-blue-200 bg-white p-5 shadow-sm sm:p-6">
       <h2 id="magic-editor-title" className="mb-5 text-lg font-semibold text-slate-900">{editor.id ? 'Editar Template' : 'Adicionar Template'}</h2>
       <form onSubmit={save} className="space-y-5">
-        <div><label htmlFor="template-name" className="mb-2 block text-sm font-medium text-slate-700">Nome <span className="font-normal text-slate-400">(opcional)</span></label><Input id="template-name" value={editor.nome} onChange={event => setEditor({ ...editor, nome: event.target.value })} placeholder="Dê um nome para identificar seu template" /></div>
-        <div><label htmlFor="template-content" className="mb-2 block text-sm font-medium text-slate-700">Conteúdo <span className="text-blue-600">*</span></label><Textarea id="template-content" required rows={6} value={editor.conteudo} aria-invalid={!!formError} aria-describedby={`template-content-help${formError ? ' template-form-error' : ''}`} onChange={event => { setEditor({ ...editor, conteudo: event.target.value }); setFormError(''); }} placeholder="Escreva o texto fixo e indique onde entram as variáveis…" /><div id="template-content-help" className="mt-2 flex flex-wrap justify-between gap-2 text-xs text-slate-500"><span>Use {'{{1}}'}, {'{{2}}'}, {'{{3}}'} para identificar as variáveis.</span><span>{countVariables(editor.conteudo)} variável(is) identificada(s)</span></div></div>
+        <div><label htmlFor="template-name" className="mb-2 block text-sm font-medium text-slate-700">Nome <span className="font-normal text-slate-400">(opcional)</span></label><Input id="template-name" disabled={loading} value={editor.nome} onChange={event => setEditor({ ...editor, nome: event.target.value })} placeholder="Dê um nome para identificar seu template" /></div>
+        <div><label htmlFor="template-content" className="mb-2 block text-sm font-medium text-slate-700">Conteúdo <span className="text-blue-600">*</span></label><Textarea id="template-content" required disabled={loading} rows={6} value={editor.conteudo} aria-invalid={!!formError} aria-describedby={`template-content-help${formError ? ' template-form-error' : ''}`} onChange={event => { setEditor({ ...editor, conteudo: event.target.value }); setFormError(''); }} placeholder="Escreva o texto fixo e indique onde entram as variáveis…" /><div id="template-content-help" className="mt-2 flex flex-wrap justify-between gap-2 text-xs text-slate-500"><span>Use {'{{1}}'}, {'{{2}}'}, {'{{3}}'} para identificar as variáveis.</span><span>{countVariables(editor.conteudo)} variável(is) identificada(s)</span></div></div>
         <TemplateAvailability instances={workspace.instances} value={editor.availability} onChange={availability => setEditor({ ...editor, availability })} disabled={loading} />
         {editor.id && <Notice>Salvar substitui a disponibilidade pela seleção acima. Desmarcar todas as instâncias remove os vínculos, mas mantém o template na biblioteca.</Notice>}
         {formError && <div id="template-form-error"><Notice tone="error">{formError}</Notice></div>}
@@ -216,7 +229,7 @@ function TemplatesContent({ workspace }: { workspace: ReturnType<typeof useShare
         : <ul className="grid gap-4 md:grid-cols-2">{visible.map(item => <li key={item.id} className="flex min-w-0 flex-col rounded-xl border border-slate-200 p-5 transition hover:border-blue-200">
           <div className="flex items-start gap-3"><span className="rounded-lg bg-blue-50 p-2 text-blue-600"><Icon name="template" /></span><div className="min-w-0"><h3 className="break-words text-sm font-semibold text-slate-900">{item.nome || 'Template sem nome'}</h3><span className="mt-1 inline-block text-xs text-slate-500">{item.variaveis_count} {item.variaveis_count === 1 ? 'variável' : 'variáveis'}</span></div></div>
           <p className="my-4 line-clamp-3 whitespace-pre-wrap break-words text-sm leading-relaxed text-slate-500">{item.conteudo}</p>
-          <div className="mb-4 space-y-2 rounded-lg bg-slate-50 p-3"><h4 className="text-xs font-semibold text-slate-700">Disponível em {item.instanceIds.length} instância(s)</h4>{item.instanceIds.length ? <ul className="space-y-2">{item.instanceIds.map(instanceId => <li key={instanceId} className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-600"><span>{workspace.instances.find(instance => instance.id === instanceId)?.name ?? 'Instância vinculada'}</span><button type="button" disabled={!canWrite} onClick={() => unlink(item.id, instanceId)} aria-label={`Remover associação de ${item.nome || 'template'} com ${workspace.instances.find(instance => instance.id === instanceId)?.name ?? 'instância'}`} className="rounded-md px-2 py-1 font-medium text-blue-700 hover:bg-blue-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-50">Remover associação</button></li>)}</ul> : <p className="text-xs leading-relaxed text-slate-500">Somente na biblioteca. Este template não aparece em Gerar Mensagem.</p>}</div>
+          <div className="mb-4 space-y-2 rounded-lg bg-slate-50 p-3"><h4 className="text-xs font-semibold text-slate-700">Disponível em {item.instanceIds.length} instância(s)</h4>{item.instanceIds.length ? <ul className="space-y-2">{item.instanceIds.map(instanceId => <li key={instanceId} className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-600"><span>{workspace.instances.find(instance => instance.id === instanceId)?.name ?? 'Instância vinculada'}</span><button type="button" disabled={!canWrite} onClick={() => setUnlinking({ templateId: item.id, instanceId })} aria-label={`Remover associação de ${item.nome || 'template'} com ${workspace.instances.find(instance => instance.id === instanceId)?.name ?? 'instância'}`} className="rounded-md px-2 py-1 font-medium text-blue-700 hover:bg-blue-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-50">Remover associação</button></li>)}</ul> : <p className="text-xs leading-relaxed text-slate-500">Somente na biblioteca. Este template não aparece em Gerar Mensagem.</p>}</div>
           <div className="mt-auto flex flex-wrap justify-end gap-2 border-t border-slate-100 pt-3"><Button variant="secondary" disabled={!canWrite} onClick={() => openEditor(item)} aria-label={`Editar ${item.nome || 'template sem nome'}`}><Icon name="edit" />Editar e associações</Button><Button variant="secondary" disabled={!canWrite} onClick={() => setDeleting(item.id)} aria-label={`Excluir ${item.nome || 'template sem nome'}`}><Icon name="trash" />Excluir da biblioteca</Button></div>
           {deleting === item.id && <MagicModal labelledBy="magic-delete-title" onClose={() => { if (!writing.current) setDeleting(null); }}><div className="rounded-xl border border-red-100 bg-red-50 p-5"><h2 id="magic-delete-title" className="text-lg font-semibold text-red-800">Excluir este template?</h2><p className="mt-2 text-sm text-red-700">{item.nome || 'Template sem nome'} será excluído da biblioteca e de todas as instâncias associadas. Para retirar apenas de uma instância, cancele e use Remover associação. Esta exclusão não pode ser desfeita.</p><div className="mt-5 flex flex-wrap justify-end gap-2"><Button autoFocus variant="secondary" disabled={pending} onClick={() => setDeleting(null)}>Cancelar</Button><Button variant="danger" disabled={!canWrite} onClick={() => remove(item.id)}>Confirmar exclusão</Button></div></div></MagicModal>}
         </li>)}</ul>}
