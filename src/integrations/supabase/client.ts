@@ -87,6 +87,6 @@ export async function verifyBackendReads(): Promise<string[]> {
     throw new Error('A sessão mudou durante a verificação. Execute novamente com a conta atual.');
   }
   results.push('Uma resposta vazia pode decorrer dos filtros ou da RLS; não comprova que a tabela esteja vazia. Nenhum registro ou política foi alterado por esta verificação.');
-  results.push('Leituras bem-sucedidas não validam a conclusão da migração, a preservação de todos os vínculos antigos ou o isolamento entre duas contas. A estrutura informada ainda exige templates.instance_id; cadastro central e importação dependem da remoção validada dessa obrigatoriedade. A exclusão de instâncias permanece protegida até validar as dependências legadas.');
+  results.push('O cadastro e a importação omitem templates.instance_id; a disponibilidade usa template_instances. Estas leituras não verificam a nulabilidade da coluna, a remoção de templates_instance_owner_fkey, os efeitos de exclusões, a preservação dos vínculos antigos ou o isolamento entre contas. Nenhum teste de gravação ou exclusão foi executado por este diagnóstico.');
   return results;
 }

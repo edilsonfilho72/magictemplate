@@ -168,7 +168,7 @@ function TemplatesContent({ workspace }: { workspace: ReturnType<typeof useShare
     <input ref={fileInput} type="file" accept=".json,application/json" className="hidden" aria-label="Importar templates em JSON" onChange={importFile} />
     <div className="mb-6 space-y-3">
       <Notice>Biblioteca central da sua conta: editar um template atualiza o mesmo texto em todas as suas associações. Remover uma associação não exclui o template. A importação ignora IDs, proprietários e vínculos do arquivo.</Notice>
-      <Notice>A compatibilidade da migração está pendente: enquanto o banco exigir templates.instance_id, novos cadastros e importações serão recusados sem criar templates. A exclusão de instâncias também aguarda essa validação.</Notice>
+      <Notice>Cadastro e importação não exigem uma instância. Sem associações, o template permanece somente na biblioteca; sua disponibilidade em Gerar Mensagem depende dos vínculos selecionados.</Notice>
       {libraryError && <><Notice tone="error">{libraryError}</Notice><Button variant="secondary" disabled={loading} onClick={() => void workspace.refresh()}>Recarregar biblioteca</Button></>}
       {feedback && <Notice tone={feedback.tone}>{feedback.text}</Notice>}
     </div>

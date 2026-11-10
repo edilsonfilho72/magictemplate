@@ -369,7 +369,7 @@ export function InstanceManager({ client, onChanged }: {
     {open && <MagicModal labelledBy="magic-instances-title" onClose={close}>
       <section aria-busy={busy} className="space-y-5 rounded-xl bg-background p-1 sm:p-2">
         <div className="flex items-start justify-between gap-4">
-          <div><h2 id="magic-instances-title" className="text-xl font-semibold text-slate-900">Gerenciar instâncias</h2><p className="mt-2 text-sm leading-relaxed text-slate-500">Associe templates da biblioteca sem duplicar seus textos. A exclusão de instâncias aguarda a validação dos vínculos legados da migração.</p></div>
+          <div><h2 id="magic-instances-title" className="text-xl font-semibold text-slate-900">Gerenciar instâncias</h2><p className="mt-2 text-sm leading-relaxed text-slate-500">Associe templates da biblioteca sem duplicar seus textos. Excluir uma instância não exclui os templates da biblioteca central.</p></div>
           <Button variant="secondary" disabled={busy} onClick={close}>Fechar</Button>
         </div>
         {feedback && <Notice tone={feedback.tone}>{feedback.text}</Notice>}
@@ -389,15 +389,15 @@ export function InstanceManager({ client, onChanged }: {
                 <div className="min-w-0"><h3 className="break-words text-sm font-semibold text-slate-900">{instance.name}</h3><p className="mt-1 text-xs text-slate-500">{instance.templateCount} template(s)</p></div>
                 <div className="flex shrink-0 flex-wrap gap-2">
                   <Button variant="secondary" disabled={saving} aria-label={`Renomear ${instance.name}`} onClick={() => { setEditingId(instance.id); setName(instance.name); setDeletingId(null); setFeedback(null); }}>Renomear</Button>
-                  <Button variant="danger" disabled title="Exclusão disponível após validar a migração e os relacionamentos legados, preservando a biblioteca." aria-label={`Excluir ${instance.name}: aguardando validação da migração`}>Excluir</Button>
+                  <Button variant="danger" disabled={saving} aria-label={`Excluir ${instance.name}`} onClick={() => { setDeletingId(instance.id); setEditingId(null); setName(''); setFeedback(null); }}>Excluir</Button>
                 </div>
               </div>
             </li>)}
           </ul>}
           {deleting && <div role="group" aria-labelledby="magic-instance-delete-title" className="space-y-3 rounded-xl border border-red-200 bg-red-50 p-4">
             <h3 id="magic-instance-delete-title" className="text-sm font-semibold text-red-800">Excluir {deleting.name}?</h3>
-            <p className="text-sm leading-relaxed text-red-700">A quantidade de templates será verificada novamente antes de excluir. Esta ação não pode ser desfeita.</p>
-            <div className="flex flex-wrap justify-end gap-2"><Button variant="secondary" disabled={saving} onClick={() => setDeletingId(null)}>Cancelar</Button><Button variant="danger" disabled={saving} onClick={() => void mutate(() => deleteEmptyInstance(client, { userId, instanceId: deleting.id }), 'Instância vazia excluída.')}>Confirmar exclusão</Button></div>
+            <p className="text-sm leading-relaxed text-red-700">Esta instância e suas associações serão removidas. Os templates continuarão na biblioteca central e nas demais instâncias associadas. Esta ação não pode ser desfeita.</p>
+            <div className="flex flex-wrap justify-end gap-2"><Button variant="secondary" disabled={saving} onClick={() => setDeletingId(null)}>Cancelar</Button><Button variant="danger" disabled={saving} onClick={() => void mutate(() => deleteEmptyInstance(client, { userId, instanceId: deleting.id }), 'Instância excluída. Os templates permanecem na biblioteca central.')}>Confirmar exclusão</Button></div>
           </div>}
         </> : <Button variant="secondary" onClick={() => void showManager()}>Tentar novamente</Button>}
       </section>

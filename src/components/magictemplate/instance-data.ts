@@ -134,11 +134,14 @@ export async function renameInstance(client: SupabaseClient, selection: Instance
 }
 
 export async function deleteEmptyInstance(client: SupabaseClient, selection: InstanceSelection) {
-  await requireSelection(client, selection);
-  // A estrutura recebida ainda mantém templates.instance_id obrigatório.
-  // Não excluir instâncias antes de validar os efeitos das FKs legadas:
-  // uma contagem zero na junção não comprova ausência de dependências antigas.
-  throw new Error('A exclusão de instâncias aguarda a validação da migração e dos relacionamentos antigos. Seus templates e associações foram preservados.');
+  const userId = await requireSelection(client, selection);
+  // A biblioteca independe da instância após a remoção da FK legada.
+  // Não excluir templates nem remover vínculos em chamadas separadas:
+  // o banco aplica seus relacionamentos na mesma operação de exclusão.
+  await requireUser(client, userId);
+  const { error } = await client.from('instances').delete()
+    .eq('id', selection.instanceId).eq('user_id', userId).select('id').single();
+  if (error) throw error;
 }
 
 async function readTemplates(client: SupabaseClient, userId: string, instanceId?: string) {
