@@ -1,0 +1,190 @@
+name: Sync lockfile MAGICtemplate
+
+# Temporário: remover após concluir e conferir a sincronização.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: magictemplate-sync-lockfile-main
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Sincronizar lockfile e validar build
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+        working-directory: .
+
+    steps:
+      - name: Obter main com o token padrão
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          token: ${{ github.token }}
+          persist-credentials: true
+
+      - name: Configurar Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Registrar versões do ambiente
+        id: versions
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/sync-lockfile-logs"
+          {
+            node --version
+            npm --version
+          } | tee "$RUNNER_TEMP/sync-lockfile-logs/versions.log"
+
+      - name: Sincronizar exclusivamente o lockfile
+        id: sync
+        run: |
+          set -euo pipefail
+          npm install --package-lock-only --ignore-scripts 2>&1 | tee "$RUNNER_TEMP/sync-lockfile-logs/sync.log"
+          test -s package-lock.json
+          git diff --exit-code -- . ':!package-lock.json'
+
+      - name: Validar instalação pelo lockfile
+        id: install
+        run: |
+          set -euo pipefail
+          npm ci 2>&1 | tee "$RUNNER_TEMP/sync-lockfile-logs/install.log"
+          git diff --exit-code -- . ':!package-lock.json'
+
+      - name: Commitar exclusivamente package-lock.json
+        id: commit
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- package-lock.json
+          if git diff --cached --quiet; then
+            echo 'Nenhuma mudança no lockfile; nenhum commit foi necessário.'
+            echo 'changed=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$(git diff --cached --name-only)" != 'package-lock.json' ]; then
+            echo '::error::O índice contém arquivos além de package-lock.json. Commit interrompido.'
+            exit 1
+          fi
+          git commit -m 'Sincroniza package-lock do MAGICtemplate' 2>&1 | tee "$RUNNER_TEMP/sync-lockfile-logs/commit.log"
+          echo 'changed=true' >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Enviar lockfile para main
+        id: push
+        if: ${{ success() && steps.commit.outputs.changed == 'true' }}
+        run: |
+          set -euo pipefail
+          if ! git push origin HEAD:refs/heads/main 2>&1 | tee "$RUNNER_TEMP/sync-lockfile-logs/push.log"; then
+            echo '::error::Envio para main recusado. Consulte o erro acima, incluindo permissões de escrita e proteção da branch. Nenhum token alternativo, force push ou contorno de segurança será usado.'
+            exit 1
+          fi
+
+      - name: Verificar carregamento da configuração Vite após a publicação
+        id: config
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE' 2>&1 | tee "$RUNNER_TEMP/sync-lockfile-logs/vite-config.log"
+          import { loadConfigFromFile } from 'vite';
+          const config = await loadConfigFromFile({ command: 'build', mode: 'production' });
+          if (!config) throw new Error('A configuração Vite não foi carregada.');
+          console.log('Configuração Vite carregada:', config.path);
+          NODE
+
+      - name: Executar npm run build após a publicação
+        id: build
+        run: |
+          set -euo pipefail
+          npm run build 2>&1 | tee "$RUNNER_TEMP/sync-lockfile-logs/build.log"
+
+      - name: Verificar árvore de rotas gerada pelo plugin
+        id: routes
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE' 2>&1 | tee "$RUNNER_TEMP/sync-lockfile-logs/routes.log"
+          import { readFileSync } from 'node:fs';
+          const tree = readFileSync('src/routeTree.gen.ts', 'utf8');
+          if (!tree.trim()) throw new Error('A árvore de rotas gerada está vazia.');
+          for (const route of ['/', '/templates', '/configuracoes']) {
+            if (!tree.includes(`'${route}'`) && !tree.includes(JSON.stringify(route))) {
+              throw new Error(`Rota ausente na árvore gerada: ${route}`);
+            }
+          }
+          console.log('src/routeTree.gen.ts gerado e contendo as três rotas esperadas.');
+          NODE
+
+      - name: Registrar verificação explícita de TypeScript
+        id: types
+        run: |
+          set -euo pipefail
+          npm exec -- tsc --noEmit 2>&1 | tee "$RUNNER_TEMP/sync-lockfile-logs/typescript.log"
+
+      - name: Confirmar preservação do manifesto e lockfile após o build
+        id: unchanged
+        run: |
+          set -euo pipefail
+          git diff --exit-code -- package.json package-lock.json
+
+      - name: Registrar resultados efetivamente executados
+        if: ${{ always() }}
+        env:
+          VERSIONS_RESULT: ${{ steps.versions.outcome }}
+          SYNC_RESULT: ${{ steps.sync.outcome }}
+          INSTALL_RESULT: ${{ steps.install.outcome }}
+          COMMIT_RESULT: ${{ steps.commit.outcome }}
+          CHANGED: ${{ steps.commit.outputs.changed }}
+          COMMIT_SHA: ${{ steps.commit.outputs.sha }}
+          PUSH_RESULT: ${{ steps.push.outcome }}
+          CONFIG_RESULT: ${{ steps.config.outcome }}
+          BUILD_RESULT: ${{ steps.build.outcome }}
+          ROUTES_RESULT: ${{ steps.routes.outcome }}
+          TYPES_RESULT: ${{ steps.types.outcome }}
+          UNCHANGED_RESULT: ${{ steps.unchanged.outcome }}
+        run: |
+          set -euo pipefail
+          {
+            echo '## Sincronização do lockfile — resultados'
+            echo "- Registro de Node e npm: $VERSIONS_RESULT"
+            if [ -f "$RUNNER_TEMP/sync-lockfile-logs/versions.log" ]; then
+              echo '```text'
+              cat "$RUNNER_TEMP/sync-lockfile-logs/versions.log"
+              echo '```'
+            fi
+            echo "- npm install --package-lock-only --ignore-scripts: $SYNC_RESULT"
+            echo "- npm ci: $INSTALL_RESULT"
+            echo "- Etapa de commit: $COMMIT_RESULT"
+            if [ "$CHANGED" = 'false' ]; then
+              echo '- Nenhuma mudança no lockfile; nenhum commit ou envio foi necessário.'
+            elif [ "$CHANGED" = 'true' ]; then
+              echo "- Commit criado: $COMMIT_SHA"
+            fi
+            echo "- Envio para main: $PUSH_RESULT"
+            echo "- Carregamento da configuração Vite: $CONFIG_RESULT"
+            echo "- npm run build (vite build && tsc --noEmit): $BUILD_RESULT"
+            echo "- Verificação da árvore de rotas: $ROUTES_RESULT"
+            echo "- Verificação explícita TypeScript: $TYPES_RESULT"
+            echo "- Preservação de package.json e package-lock.json após o build: $UNCHANGED_RESULT"
+            echo '- failure indica erro; skipped indica etapa não executada, não validação.'
+            echo '- Se o build falhou, consulte build.log para identificar se a falha ocorreu no Vite ou no TypeScript; o TypeScript do script só roda após o Vite concluir.'
+            echo '- Um lockfile enviado não é revertido em caso de falha posterior.'
+            echo '- Os erros completos constam nos logs das etapas e no artefato sync-lockfile-diagnostics.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Preservar logs de diagnóstico
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: sync-lockfile-diagnostics
+          path: ${{ runner.temp }}/sync-lockfile-logs/*.log
+          if-no-files-found: warn
+          retention-days: 14
