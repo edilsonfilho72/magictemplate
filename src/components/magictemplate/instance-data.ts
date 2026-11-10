@@ -43,9 +43,19 @@ function failureText(error: unknown) {
 function checkTemplateInsertError(error: { code?: string; message: string } | null) {
   if (!error) return;
   if (error.code === '23502' && error.message.includes('instance_id')) {
-    throw new Error('O banco ainda exige o vínculo antigo templates.instance_id. Conclua a validação da migração para liberar cadastro e importação na biblioteca central. Nenhum template foi criado por esta operação.');
+    throw new Error('O banco recusou o cadastro sem templates.instance_id, contrariando a estrutura esperada da biblioteca central. Nenhum template foi criado por esta operação.');
   }
-  throw error;
+  // Uma resposta de erro pode ocorrer depois do envio da gravação.
+  // Não apresentar o mesmo formulário como um cadastro seguro para repetir.
+  throw new CommittedWriteError(`A gravação não foi confirmada. Confira a biblioteca atualizada antes de repetir o cadastro ou a importação; o registro pode já existir. ${failureText(error)}`);
+}
+
+async function submitWrite<T>(request: PromiseLike<T>): Promise<T> {
+  try {
+    return await request;
+  } catch (cause) {
+    throw new CommittedWriteError(`A solicitação foi enviada, mas não foi possível confirmar o resultado. Confira os dados atualizados antes de repetir a operação. ${failureText(cause)}`);
+  }
 }
 
 async function requireUser(client: SupabaseClient, expectedUserId?: string) {
@@ -113,9 +123,11 @@ export async function createInstance(client: SupabaseClient, expectedUserId: str
     }
   }
   await requireUser(client, userId);
-  const { data, error } = await client.from('instances')
-    .insert({ user_id: userId, name: instanceName(name) }).select(instanceColumns).single();
-  if (error) throw error;
+  const { data, error } = await submitWrite(client.from('instances')
+    .insert({ user_id: userId, name: instanceName(name) }).select(instanceColumns).single());
+  if (error || !data) {
+    throw new CommittedWriteError(`A criação da instância não foi confirmada. Confira a lista atualizada antes de criar novamente; a instância pode já existir. ${error ? failureText(error) : ''}`);
+  }
   const instance = data as Instance;
   try {
     await insertLinks(client, userId, ids.flatMap(templateId => [{ template_id: templateId, instance_id: instance.id, user_id: userId }]));
@@ -265,9 +277,9 @@ export async function saveInstanceTemplate(
   const query = templateId
     ? client.from('templates').update(values).eq('id', templateId).eq('user_id', userId)
     : client.from('templates').insert({ ...values, user_id: userId });
-  const { data, error } = await query.select('id').single();
+  const { data, error } = await submitWrite(query.select('id').single());
   checkTemplateInsertError(error);
-  if (!data) throw new Error('O template não foi gravado. Atualize a biblioteca.');
+  if (!data) throw new CommittedWriteError('A gravação foi enviada sem confirmação do template. Confira a biblioteca antes de repetir o cadastro.');
   const savedId = String(data.id);
   try {
     await replaceTemplateAssociations(client, userId, savedId, ids);
@@ -278,24 +290,40 @@ export async function saveInstanceTemplate(
 }
 
 export async function importInstanceTemplates(client: SupabaseClient, expectedUserId: string, file: File, instanceIds: string[]) {
-  if (file.size > 1024 * 1024) throw new Error('Escolha um arquivo JSON de até 1 MB.');
+  if (file.size > 1024 * 1024) throw new Error('Escolha um arquivo JSON ou TXT de até 1 MB.');
+  const extension = file.name.split('.').pop()?.toLowerCase();
+  if (extension !== 'json' && extension !== 'txt') {
+    throw new Error('Escolha um arquivo com extensão .json ou .txt.');
+  }
+  const text = (await file.text()).replace(/^\uFEFF/, '');
   let parsed: unknown;
-  try {
-    parsed = JSON.parse(await file.text());
-  } catch (error) {
-    if (error instanceof SyntaxError) throw new Error('O arquivo não contém JSON válido.');
-    throw error;
+  if (extension === 'txt') {
+    // Linhas vazias pertencem ao conteúdo. Apenas uma linha com --- separa templates.
+    const blocks = text.replace(/\r\n?/g, '\n').split(/^[\t ]*---[\t ]*$/m)
+      .map(block => block.trim()).filter(Boolean);
+    const name = file.name.replace(/\.txt$/i, '').trim() || 'Template importado';
+    parsed = blocks.map((conteudo, index) => ({
+      nome: blocks.length === 1 ? name : `${name} ${index + 1}`,
+      conteudo,
+    }));
+  } else {
+    try {
+      parsed = JSON.parse(text);
+    } catch (error) {
+      if (error instanceof SyntaxError) throw new Error('O arquivo não contém JSON válido.');
+      throw error;
+    }
   }
   if (!Array.isArray(parsed) || parsed.length === 0 || parsed.length > 100) {
-    throw new Error('O arquivo deve conter uma lista de 1 a 100 templates.');
+    throw new Error('O arquivo deve conter de 1 a 100 templates: uma lista de objetos no JSON ou blocos separados por uma linha com --- no TXT.');
   }
   // Só nome e conteúdo são importados; IDs, vínculos e proprietários são ignorados.
   const values = parsed.map((value, index) => templateValues(value, index));
   const userId = await requireUser(client, expectedUserId);
   const ids = await validateInstanceIds(client, userId, instanceIds);
   await requireUser(client, userId);
-  const { data, error } = await client.from('templates')
-    .insert(values.map(value => ({ ...value, user_id: userId }))).select('id');
+  const { data, error } = await submitWrite(client.from('templates')
+    .insert(values.map(value => ({ ...value, user_id: userId }))).select('id'));
   checkTemplateInsertError(error);
   if (!data || data.length !== values.length) {
     throw new CommittedWriteError('A importação foi enviada, mas a confirmação está incompleta. Confira a biblioteca antes de importar novamente.');

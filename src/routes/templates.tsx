@@ -115,10 +115,32 @@ function TemplatesContent({ workspace }: { workspace: ReturnType<typeof useShare
         setFeedback({ tone: 'error', text: operationError(error) });
       }
     } finally {
-      // Também reler após falhas: uma sequência de chamadas pode ter gravado parte dos vínculos.
-      if (active.current) await workspace.refresh();
+      // Manter o bloqueio até reler também a biblioteca, não só a instância selecionada.
+      // Falhas parciais ou respostas perdidas nunca provocam reenvio automático.
+      if (active.current) {
+        setLibraryLoading(true);
+        try {
+          await workspace.refresh();
+          if (active.current && client) {
+            const rows = await loadTemplateLibrary(client, workspace.userId);
+            if (active.current) {
+              setTemplates(rows);
+              setLibraryError('');
+            }
+          }
+        } catch (cause) {
+          if (active.current) {
+            setTemplates([]);
+            setLibraryError(`Não foi possível conferir a biblioteca após a operação. Recarregue antes de tentar novamente. ${operationError(cause)}`);
+          }
+        } finally {
+          if (active.current) {
+            setLibraryLoading(false);
+            setPending(false);
+          }
+        }
+      }
       writing.current = false;
-      if (active.current) setPending(false);
     }
   }
 
@@ -162,7 +184,7 @@ function TemplatesContent({ workspace }: { workspace: ReturnType<typeof useShare
       {client && workspace.error && <Button variant="secondary" disabled={loading} onClick={() => void workspace.refresh()}>Tentar novamente</Button>}
       <BackendConnectionCheck />
     </section>
-    <input ref={fileInput} type="file" accept=".json,application/json" className="hidden" aria-label="Importar templates em JSON" onChange={importFile} />
+    <input ref={fileInput} type="file" accept=".json,.txt,application/json,text/plain" className="hidden" aria-label="Importar templates em JSON ou TXT" onChange={importFile} />
     <div className="mb-6 space-y-3">
       <Notice>Biblioteca central da sua conta: editar um template atualiza o mesmo texto em todas as suas associações. Remover uma associação não exclui o template. A importação ignora IDs, proprietários e vínculos do arquivo.</Notice>
       <Notice>Cadastro e importação não exigem uma instância. Sem associações, o template permanece somente na biblioteca; sua disponibilidade em Gerar Mensagem depende dos vínculos selecionados.</Notice>
@@ -173,8 +195,8 @@ function TemplatesContent({ workspace }: { workspace: ReturnType<typeof useShare
       <h2 id="magic-import-title" className="text-lg font-semibold">Importar para a biblioteca</h2>
       <p className="text-sm leading-relaxed text-slate-500">Cada objeto será cadastrado uma única vez, com as associações escolhidas abaixo. Selecionar várias instâncias não duplica o template.</p>
       <TemplateAvailability instances={workspace.instances} value={importAvailability} onChange={setImportAvailability} disabled={loading} />
-      <Notice>Use um arquivo JSON de até 1 MB, com 1 a 100 objetos contendo conteudo e, opcionalmente, nome.</Notice>
-      <div className="flex flex-wrap justify-end gap-2"><Button variant="secondary" disabled={pending} onClick={() => setImporting(false)}>Cancelar</Button><Button disabled={!canWrite} onClick={() => fileInput.current?.click()}>{pending ? 'Importando…' : 'Escolher JSON e importar'}</Button></div>
+      <Notice>Use JSON ou TXT de até 1 MB, com 1 a 100 templates. No JSON, informe uma lista de objetos contendo conteudo e, opcionalmente, nome. No TXT, cada bloco é um template; separe os blocos por uma linha contendo apenas ---. Linhas vazias dentro do texto são preservadas. Os nomes usam o nome do arquivo e a posição do bloco.</Notice>
+      <div className="flex flex-wrap justify-end gap-2"><Button variant="secondary" disabled={pending} onClick={() => setImporting(false)}>Cancelar</Button><Button disabled={!canWrite} onClick={() => fileInput.current?.click()}>{pending ? 'Importando…' : 'Escolher JSON ou TXT e importar'}</Button></div>
     </section></MagicModal>}
     {editor && <MagicModal labelledBy="magic-editor-title" onClose={() => { if (!writing.current) { setEditor(null); setFormError(''); } }}><section ref={editorPanel} aria-labelledby="magic-editor-title" className="rounded-2xl border border-blue-200 bg-white p-5 shadow-sm sm:p-6">
       <h2 id="magic-editor-title" className="mb-5 text-lg font-semibold text-slate-900">{editor.id ? 'Editar Template' : 'Adicionar Template'}</h2>
@@ -198,7 +220,7 @@ function TemplatesContent({ workspace }: { workspace: ReturnType<typeof useShare
           <div className="mt-auto flex flex-wrap justify-end gap-2 border-t border-slate-100 pt-3"><Button variant="secondary" disabled={!canWrite} onClick={() => openEditor(item)} aria-label={`Editar ${item.nome || 'template sem nome'}`}><Icon name="edit" />Editar e associações</Button><Button variant="secondary" disabled={!canWrite} onClick={() => setDeleting(item.id)} aria-label={`Excluir ${item.nome || 'template sem nome'}`}><Icon name="trash" />Excluir da biblioteca</Button></div>
           {deleting === item.id && <MagicModal labelledBy="magic-delete-title" onClose={() => { if (!writing.current) setDeleting(null); }}><div className="rounded-xl border border-red-100 bg-red-50 p-5"><h2 id="magic-delete-title" className="text-lg font-semibold text-red-800">Excluir este template?</h2><p className="mt-2 text-sm text-red-700">{item.nome || 'Template sem nome'} será excluído da biblioteca e de todas as instâncias associadas. Para retirar apenas de uma instância, cancele e use Remover associação. Esta exclusão não pode ser desfeita.</p><div className="mt-5 flex flex-wrap justify-end gap-2"><Button autoFocus variant="secondary" disabled={pending} onClick={() => setDeleting(null)}>Cancelar</Button><Button variant="danger" disabled={!canWrite} onClick={() => remove(item.id)}>Confirmar exclusão</Button></div></div></MagicModal>}
         </li>)}</ul>}
-      <p className="mt-5 text-xs leading-relaxed text-slate-400">Importação: arquivo JSON de até 1 MB, com uma lista de até 100 objetos contendo conteudo obrigatório e nome opcional. As variáveis são contadas automaticamente.</p>
+      <p className="mt-5 text-xs leading-relaxed text-slate-400">Importação: JSON ou TXT de até 1 MB e 100 templates. JSON usa uma lista com conteudo obrigatório e nome opcional. TXT usa blocos separados por uma linha contendo apenas ---. As variáveis são contadas automaticamente. Se houver falha de confirmação, confira a biblioteca antes de importar novamente.</p>
     </section>
   </MagicLayout>;
 }

@@ -77,7 +77,7 @@ export function InstanceWorkspaceControls({ id, disabled = false, onChange }: {
       </div> : <p className="text-sm text-slate-500">{workspace.loading ? 'Consultando instâncias e disponibilidade…' : !ready ? 'Seleção indisponível. Confira o diagnóstico de sessão e conexão abaixo.' : 'Nenhuma instância selecionada.'}</p>}
     </div>
     {workspace.client
-      ? <InstanceManager client={workspace.client} onChanged={() => void workspace.refresh()} disabled={disabled || workspace.loading} showEmptyState={ready && workspace.instances.length === 0} />
+      ? <InstanceManager client={workspace.client} onChanged={workspace.refresh} disabled={disabled || workspace.loading} showEmptyState={ready && workspace.instances.length === 0} />
       : <Button variant="secondary" disabled>Gerenciar instâncias</Button>}
   </div>;
 }
@@ -271,7 +271,7 @@ export function useSharedInstanceWorkspace() {
 
 export function InstanceManager({ client, onChanged, disabled = false, showEmptyState = false }: {
   client: SupabaseClient;
-  onChanged: () => void;
+  onChanged: () => void | Promise<void>;
   disabled?: boolean;
   showEmptyState?: boolean;
 }) {
@@ -288,6 +288,7 @@ export function InstanceManager({ client, onChanged, disabled = false, showEmpty
   const [feedback, setFeedback] = useState<{ tone: 'success' | 'error'; text: string } | null>(null);
   const generation = useRef(0);
   const owner = useRef('');
+  const writing = useRef(false);
   const busy = loading || saving;
 
   useEffect(() => {
@@ -348,41 +349,47 @@ export function InstanceManager({ client, onChanged, disabled = false, showEmpty
   }
 
   async function mutate(operation: () => Promise<unknown>, success: string) {
-    if (busy || !userId) return;
+    if (busy || writing.current || !userId) return;
+    writing.current = true;
     const ticket = generation.current;
     setSaving(true);
     setFeedback(null);
-    let written = false;
+    let outcome: { tone: 'success' | 'error'; text: string } = { tone: 'success', text: success };
     try {
       await operation();
-      written = true;
       if (ticket !== generation.current) return;
       setEditingId(null);
       setDeletingId(null);
       setName('');
       setSelectedTemplateIds([]);
-      onChanged();
-      if (await refresh(ticket)) setFeedback({ tone: 'success', text: success });
     } catch (error) {
-      if (ticket === generation.current) {
-        if (error instanceof CommittedWriteError) {
-          setName('');
-          setSelectedTemplateIds([]);
-          onChanged();
-          try { await refresh(ticket); } catch {
-            if (ticket === generation.current) { setUserId(''); setInstances([]); setLibrary([]); }
-          }
-        } else if (written) {
+      outcome = { tone: 'error', text: errorMessage(error) };
+      if (ticket === generation.current && error instanceof CommittedWriteError) {
+        // Resultado parcial ou incerto: exigir conferência, sem repetir o cadastro.
+        setEditingId(null);
+        setDeletingId(null);
+        setName('');
+        setSelectedTemplateIds([]);
+      }
+    } finally {
+      try {
+        if (ticket === generation.current) {
+          // Mesmo erros comuns podem acompanhar uma resposta perdida após gravação.
+          // Atualizar o workspace e o modal antes de liberar qualquer nova tentativa.
+          await onChanged();
+          if (ticket === generation.current && await refresh(ticket)) setFeedback(outcome);
+        }
+      } catch (cause) {
+        if (ticket === generation.current) {
           setUserId('');
           setInstances([]);
           setLibrary([]);
+          setFeedback({ tone: 'error', text: `${outcome.text} Não foi possível conferir os dados atualizados. Use Tentar novamente antes de realizar outra operação. ${errorMessage(cause)}` });
         }
-        if (ticket === generation.current) setFeedback({ tone: 'error', text: written
-          ? 'A alteração foi gravada, mas a lista não pôde ser atualizada. Feche e abra o gerenciamento novamente.'
-          : errorMessage(error) });
+      } finally {
+        writing.current = false;
+        if (ticket === generation.current) setSaving(false);
       }
-    } finally {
-      if (ticket === generation.current) setSaving(false);
     }
   }
 
