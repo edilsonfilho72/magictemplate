@@ -3,6 +3,7 @@ import { createFileRoute } from '@tanstack/react-router';
 import { MagicLayout } from '../components/magictemplate/layout';
 import { InstanceSelector, useSharedInstanceWorkspace } from '../components/magictemplate/instance-controls';
 import { VariableResults } from '../components/magictemplate/variable-results';
+import { BackendConnectionCheck } from '../components/magictemplate/backend-connection-check';
 import { Button, Icon, Notice, PageHeader, Textarea } from '../components/ui/magic-ui';
 
 export const Route = createFileRoute('/')({ component: GeneratePage });
@@ -29,6 +30,7 @@ function GenerateContent({ workspace }: { workspace: ReturnType<typeof useShared
       {error && <Notice tone="error">{error}</Notice>}
       {persistenceWarning && <Notice>{persistenceWarning}</Notice>}
       {workspace.client && error && <Button variant="secondary" disabled={loading} onClick={() => void workspace.refresh()}>Tentar novamente</Button>}
+      <BackendConnectionCheck />
       <div>
         <label htmlFor="magic-template" className="mb-2 block text-sm font-medium text-slate-700">Template</label>
         <select id="magic-template" disabled={!selection || loading} value={selectedId} onChange={event => { setSelectedId(event.target.value); setComplements({}); }} className="min-h-11 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400">

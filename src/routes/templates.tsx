@@ -4,6 +4,7 @@ import { MagicLayout } from '../components/magictemplate/layout';
 import { InstanceManager, InstanceSelector, useSharedInstanceWorkspace } from '../components/magictemplate/instance-controls';
 import { deleteInstanceTemplate, importInstanceTemplates, saveInstanceTemplate, type InstanceTemplate } from '../components/magictemplate/instance-data';
 import { MagicModal } from '../components/ui/magic-modal';
+import { BackendConnectionCheck } from '../components/magictemplate/backend-connection-check';
 import { Button, EmptyState, Icon, Input, Notice, PageHeader, Textarea } from '../components/ui/magic-ui';
 
 export const Route = createFileRoute('/templates')({ component: TemplatesPage });
@@ -117,6 +118,7 @@ function TemplatesContent({ workspace }: { workspace: ReturnType<typeof useShare
       {workspace.error && <Notice tone="error">{workspace.error}</Notice>}
       {workspace.persistenceWarning && <Notice>{workspace.persistenceWarning}</Notice>}
       {client && workspace.error && <Button variant="secondary" disabled={loading} onClick={() => void workspace.refresh()}>Tentar novamente</Button>}
+      <BackendConnectionCheck />
     </section>
     <input ref={fileInput} type="file" accept=".json,application/json" className="hidden" aria-label="Importar templates em JSON" onChange={importFile} />
     <div className="mb-6 space-y-3">
