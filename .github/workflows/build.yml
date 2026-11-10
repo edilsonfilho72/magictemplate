@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: magictemplate-build-${{ github.ref }}
@@ -31,26 +31,30 @@ jobs:
           node-version: '20'
           registry-url: https://registry.npmjs.org
 
-      - name: Preparar resolução inicial com metadados oficiais
+      - name: Exigir lockfile versionado sem recalcular dependências
         id: prepare
         run: |
           set -euo pipefail
           node --version
           npm --version
-          if [ -f package-lock.json ]; then
-            echo 'bootstrap=false' >> "$GITHUB_OUTPUT"
-            echo 'Lockfile versionado encontrado; nenhuma versão será recalculada.'
-          else
-            echo 'bootstrap=true' >> "$GITHUB_OUTPUT"
-            node scripts/prepare-tanstack-lock.mjs 2>&1 | tee dependency-preparation.log
+          if [ ! -f package-lock.json ] || ! git ls-files --error-unmatch package-lock.json >/dev/null 2>&1; then
+            echo '::error::package-lock.json ausente do commit. Sincronize-o com npm install na raiz, valide com npm ci e npm run build e inclua-o no commit. Este workflow não gera nem altera o lockfile.'
+            exit 1
           fi
+          echo 'Lockfile versionado encontrado; a instalação utilizará somente npm ci.'
 
       - name: Instalar exclusivamente pelo lockfile
         id: install
         run: |
           set -euo pipefail
           npm ci --strict-peer-deps 2>&1 | tee install.log
-          git diff --exit-code -- src
+          git diff --exit-code -- package.json package-lock.json src
+
+      - name: Registrar resoluções Supabase instaladas
+        id: supabase
+        run: |
+          set -euo pipefail
+          npm ls @supabase/supabase-js @supabase/auth-js @supabase/functions-js @supabase/postgrest-js @supabase/realtime-js @supabase/storage-js --all 2>&1 | tee supabase-versions.log
 
       - name: Registrar resoluções TanStack e verificar exports
         id: dependencies
@@ -127,17 +131,11 @@ jobs:
           set -euo pipefail
           npm run build 2>&1 | tee build.log
 
-      - name: Versionar somente dependências validadas e lockfile
-        id: persist
-        if: ${{ success() && steps.prepare.outputs.bootstrap == 'true' && github.ref == 'refs/heads/main' }}
+      - name: Confirmar preservação do manifesto e do lockfile
+        id: unchanged
         run: |
           set -euo pipefail
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -- package.json package-lock.json
-          git commit -m 'Fixe o generator compatível e versione o lockfile validado'
-          git push origin HEAD:main
-          echo 'Dependências e lockfile publicados após build bem-sucedido.'
+          git diff --exit-code -- package.json package-lock.json
 
       - name: Disponibilizar diagnósticos e resolução
         if: ${{ always() }}
@@ -157,33 +155,30 @@ jobs:
         env:
           PREPARE_RESULT: ${{ steps.prepare.outcome }}
           INSTALL_RESULT: ${{ steps.install.outcome }}
+          SUPABASE_RESULT: ${{ steps.supabase.outcome }}
           DEPENDENCIES_RESULT: ${{ steps.dependencies.outcome }}
           CONFIG_RESULT: ${{ steps.config.outcome }}
           VITE_RESULT: ${{ steps.vite.outcome }}
           ROUTES_RESULT: ${{ steps.routes.outcome }}
           TYPES_RESULT: ${{ steps.types.outcome }}
           BUILD_RESULT: ${{ steps.build.outcome }}
-          PERSIST_RESULT: ${{ steps.persist.outcome }}
-          BOOTSTRAP: ${{ steps.prepare.outputs.bootstrap }}
+          UNCHANGED_RESULT: ${{ steps.unchanged.outcome }}
         run: |
           {
             echo '## MAGICtemplate — resultados'
-            echo "- Preparação: ${PREPARE_RESULT}"
+            echo "- Presença do lockfile versionado: ${PREPARE_RESULT}"
             echo "- npm ci: ${INSTALL_RESULT}"
-            echo "- Dependências e exports: ${DEPENDENCIES_RESULT}"
+            echo "- Resoluções Supabase: ${SUPABASE_RESULT}"
+            echo "- Dependências TanStack e exports: ${DEPENDENCIES_RESULT}"
             echo "- Carregamento da configuração Vite: ${CONFIG_RESULT}"
             echo "- Compilação Vite: ${VITE_RESULT}"
             echo "- Geração automática e presença das três rotas: ${ROUTES_RESULT}"
             echo "- TypeScript: ${TYPES_RESULT}"
             echo "- npm run build: ${BUILD_RESULT}"
-            if [ "$BOOTSTRAP" = 'true' ]; then
-              echo "- Publicação inicial de package.json e package-lock.json: ${PERSIST_RESULT}"
-              if [ "$PERSIST_RESULT" != 'success' ]; then
-                echo '- O lockfile inicial ainda não foi confirmado no repositório. Consulte a primeira etapa que falhou; proteção da branch também pode impedir a publicação.'
-              fi
-            else
-              echo '- Instalação baseada no lockfile já versionado.'
-            fi
-            echo '- Metadados, versões resolvidas, exports e logs estão no artefato build-diagnostics.'
-            echo '- Nenhum arquivo de rota gerado é criado manualmente ou incluído no commit.'
+            echo "- Manifesto e lockfile preservados: ${UNCHANGED_RESULT}"
+            echo '- Etapas com resultado skipped não foram executadas e não representam validação.'
+            echo '- npm install não é executado por este workflow; a sincronização do lockfile deve anteceder o commit.'
+            echo '- Este workflow não cria commits nem envia alterações ao GitHub.'
+            echo '- Os logs produzidos estão no artefato build-diagnostics.'
+            echo '- A árvore de rotas é gerada pelo plugin; não é criada manualmente nem publicada pelo workflow.'
           } >> "$GITHUB_STEP_SUMMARY"
