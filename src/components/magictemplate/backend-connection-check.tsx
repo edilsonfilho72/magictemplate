@@ -57,7 +57,7 @@ export function BackendConnectionCheck() {
     <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
       <div className="min-w-0">
         <h3 className="text-sm font-semibold text-slate-800">Conexão com o banco</h3>
-        <p className="mt-1 text-xs leading-relaxed text-slate-500">Verifica a sessão atual e faz leituras reais de instances e templates, sem alterar dados ou permissões.</p>
+        <p className="mt-1 text-xs leading-relaxed text-slate-500">Verifica a sessão atual e faz leituras reais de instances, templates e template_instances, sem alterar dados ou permissões. Esta leitura não certifica a conclusão da migração.</p>
       </div>
       <Button variant="secondary" className="shrink-0" disabled={pending || !client} onClick={() => void verify()}>{pending ? 'Verificando leituras…' : 'Verificar conexão e leitura'}</Button>
     </div>

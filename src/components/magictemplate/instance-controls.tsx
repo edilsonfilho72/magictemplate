@@ -3,10 +3,12 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { MagicModal } from '../ui/magic-modal';
 import { Button, EmptyState, Input, Notice } from '../ui/magic-ui';
 import {
+  CommittedWriteError,
   createInstance,
   deleteEmptyInstance,
   loadInstances,
   loadInstanceTemplates,
+  loadTemplateLibrary,
   renameInstance,
   type InstanceSelection,
   type InstanceTemplate,
@@ -41,7 +43,7 @@ export function InstanceSelector({
     : workspace.error ? 'Consulte o aviso abaixo e use Verificar conexão e leitura para conferir a sessão e o acesso ao banco.'
     : !workspace.userId ? 'Entre na sua conta para consultar suas instâncias reais.'
     : !instances.length ? 'Nenhuma instância foi retornada para esta conta. Crie uma em Gerenciar instâncias, na tela Templates, ou verifique a conexão abaixo.'
-    : 'A seleção é compartilhada entre as duas telas. Somente os templates desta instância serão exibidos; o número indica a quantidade de templates.';
+    : 'A seleção é compartilhada com Gerar Mensagem, que usa somente templates associados. Na tela Templates, a biblioteca continua completa; o número indica a quantidade de associações.';
   return <div className="w-full min-w-0 flex-1 text-foreground" aria-busy={loading}>
     <label htmlFor={id} className="mb-2 block text-sm font-semibold text-slate-700">Instância <span className="text-blue-600">*</span></label>
     <select id={id} required value={selected} disabled={disabled || loading || !workspace.client || !workspace.userId || !instances.length}
@@ -232,6 +234,8 @@ export function InstanceManager({ client, onChanged }: {
 }) {
   const [open, setOpen] = useState(false);
   const [instances, setInstances] = useState<InstanceWithCount[]>([]);
+  const [library, setLibrary] = useState<InstanceTemplate[]>([]);
+  const [selectedTemplateIds, setSelectedTemplateIds] = useState<string[]>([]);
   const [userId, setUserId] = useState('');
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -251,6 +255,8 @@ export function InstanceManager({ client, onChanged }: {
         owner.current = nextOwner;
         setOpen(false);
         setInstances([]);
+        setLibrary([]);
+        setSelectedTemplateIds([]);
         setUserId('');
         setName('');
         setEditingId(null);
@@ -268,10 +274,12 @@ export function InstanceManager({ client, onChanged }: {
 
   async function refresh(ticket: number) {
     const result = await loadInstances(client);
+    const templates = await loadTemplateLibrary(client, result.userId);
     if (ticket !== generation.current) return false;
     owner.current = result.userId;
     setUserId(result.userId);
     setInstances(result.instances);
+    setLibrary(templates);
     return true;
   }
 
@@ -280,6 +288,8 @@ export function InstanceManager({ client, onChanged }: {
     setOpen(true);
     setLoading(true);
     setInstances([]);
+    setLibrary([]);
+    setSelectedTemplateIds([]);
     setUserId('');
     setEditingId(null);
     setDeletingId(null);
@@ -307,15 +317,24 @@ export function InstanceManager({ client, onChanged }: {
       setEditingId(null);
       setDeletingId(null);
       setName('');
+      setSelectedTemplateIds([]);
       onChanged();
       if (await refresh(ticket)) setFeedback({ tone: 'success', text: success });
     } catch (error) {
       if (ticket === generation.current) {
-        if (written) {
+        if (error instanceof CommittedWriteError) {
+          setName('');
+          setSelectedTemplateIds([]);
+          onChanged();
+          try { await refresh(ticket); } catch {
+            if (ticket === generation.current) { setUserId(''); setInstances([]); setLibrary([]); }
+          }
+        } else if (written) {
           setUserId('');
           setInstances([]);
+          setLibrary([]);
         }
-        setFeedback({ tone: 'error', text: written
+        if (ticket === generation.current) setFeedback({ tone: 'error', text: written
           ? 'A alteração foi gravada, mas a lista não pôde ser atualizada. Feche e abra o gerenciamento novamente.'
           : errorMessage(error) });
       }
@@ -333,7 +352,7 @@ export function InstanceManager({ client, onChanged }: {
     if (editingId) {
       void mutate(() => renameInstance(client, { userId, instanceId: editingId }, name), 'Instância renomeada.');
     } else {
-      void mutate(() => createInstance(client, userId, name), 'Instância criada.');
+      void mutate(() => createInstance(client, userId, name, selectedTemplateIds), 'Instância criada com as associações selecionadas.');
     }
   }
 
@@ -350,7 +369,7 @@ export function InstanceManager({ client, onChanged }: {
     {open && <MagicModal labelledBy="magic-instances-title" onClose={close}>
       <section aria-busy={busy} className="space-y-5 rounded-xl bg-background p-1 sm:p-2">
         <div className="flex items-start justify-between gap-4">
-          <div><h2 id="magic-instances-title" className="text-xl font-semibold text-slate-900">Gerenciar instâncias</h2><p className="mt-2 text-sm leading-relaxed text-slate-500">Separe seus templates por contexto. Apenas instâncias vazias podem ser excluídas.</p></div>
+          <div><h2 id="magic-instances-title" className="text-xl font-semibold text-slate-900">Gerenciar instâncias</h2><p className="mt-2 text-sm leading-relaxed text-slate-500">Associe templates da biblioteca sem duplicar seus textos. A exclusão de instâncias aguarda a validação dos vínculos legados da migração.</p></div>
           <Button variant="secondary" disabled={busy} onClick={close}>Fechar</Button>
         </div>
         {feedback && <Notice tone={feedback.tone}>{feedback.text}</Notice>}
@@ -358,6 +377,7 @@ export function InstanceManager({ client, onChanged }: {
           <form onSubmit={submit} className="space-y-3 rounded-xl border border-blue-100 bg-blue-50/40 p-4">
             <label htmlFor="magic-instance-name" className="block text-sm font-medium text-slate-700">{editingId ? 'Renomear instância' : 'Criar instância'}</label>
             <Input id="magic-instance-name" required disabled={saving} value={name} onChange={event => setName(event.target.value)} placeholder="Nome da instância" />
+            {!editingId && <fieldset disabled={saving} className="space-y-3 rounded-xl border border-slate-200 bg-white p-3 text-foreground"><legend className="px-1 text-sm font-semibold text-slate-700">Associar templates existentes</legend><p className="text-xs leading-relaxed text-slate-500">Escolha os templates disponíveis nesta nova instância. Nenhum conteúdo será duplicado.</p><div className="max-h-48 space-y-2 overflow-y-auto">{library.length ? library.map(template => <label key={template.id} className="flex items-center gap-3 text-sm text-slate-700"><input type="checkbox" checked={selectedTemplateIds.includes(template.id)} onChange={event => setSelectedTemplateIds(current => event.target.checked ? [...current, template.id] : current.filter(id => id !== template.id))} className="h-4 w-4 shrink-0 rounded border-slate-300 accent-blue-600 focus-visible:ring-2 focus-visible:ring-blue-500" /><span className="break-words">{template.nome || 'Template sem nome'}</span></label>) : <p className="text-sm text-slate-500">A biblioteca ainda não contém templates.</p>}</div></fieldset>}
             <div className="flex flex-wrap justify-end gap-2">
               {editingId && <Button variant="secondary" disabled={saving} onClick={() => { setEditingId(null); setName(''); }}>Cancelar edição</Button>}
               <Button type="submit" disabled={saving || !name.trim()}>{saving ? 'Salvando…' : editingId ? 'Salvar nome' : 'Criar instância'}</Button>
@@ -369,7 +389,7 @@ export function InstanceManager({ client, onChanged }: {
                 <div className="min-w-0"><h3 className="break-words text-sm font-semibold text-slate-900">{instance.name}</h3><p className="mt-1 text-xs text-slate-500">{instance.templateCount} template(s)</p></div>
                 <div className="flex shrink-0 flex-wrap gap-2">
                   <Button variant="secondary" disabled={saving} aria-label={`Renomear ${instance.name}`} onClick={() => { setEditingId(instance.id); setName(instance.name); setDeletingId(null); setFeedback(null); }}>Renomear</Button>
-                  <Button variant="danger" disabled={saving || instance.templateCount > 0} title={instance.templateCount ? 'A instância contém templates.' : 'Excluir instância vazia'} aria-label={`Excluir ${instance.name}`} onClick={() => { setDeletingId(instance.id); setFeedback(null); }}>Excluir</Button>
+                  <Button variant="danger" disabled title="Exclusão disponível após validar a migração e os relacionamentos legados, preservando a biblioteca." aria-label={`Excluir ${instance.name}: aguardando validação da migração`}>Excluir</Button>
                 </div>
               </div>
             </li>)}

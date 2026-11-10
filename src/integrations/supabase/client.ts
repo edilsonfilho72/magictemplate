@@ -63,10 +63,10 @@ export async function verifyBackendReads(): Promise<string[]> {
   const results = ['Usuário autenticado validado pelo backend.'];
   // Leituras mínimas e independentes: templates é consultada mesmo sem instâncias visíveis.
   // Nenhum conteúdo, token ou identificador é incluído no relatório.
-  for (const table of ['instances', 'templates'] as const) {
+  for (const table of ['instances', 'templates', 'template_instances'] as const) {
     try {
       const { data, error, status } = await client.schema('public').from(table)
-        .select('id').eq('user_id', userId).limit(1);
+        .select(table === 'template_instances' ? 'template_id,instance_id,user_id,created_at' : 'id').eq('user_id', userId).limit(1);
       if (error) {
         const hint = status === 401
           ? 'A requisição não foi autorizada; verifique a sessão e a configuração pública do backend.'
@@ -87,5 +87,6 @@ export async function verifyBackendReads(): Promise<string[]> {
     throw new Error('A sessão mudou durante a verificação. Execute novamente com a conta atual.');
   }
   results.push('Uma resposta vazia pode decorrer dos filtros ou da RLS; não comprova que a tabela esteja vazia. Nenhum registro ou política foi alterado por esta verificação.');
+  results.push('Leituras bem-sucedidas não validam a conclusão da migração, a preservação de todos os vínculos antigos ou o isolamento entre duas contas. A estrutura informada ainda exige templates.instance_id; cadastro central e importação dependem da remoção validada dessa obrigatoriedade. A exclusão de instâncias permanece protegida até validar as dependências legadas.');
   return results;
 }

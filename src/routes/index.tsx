@@ -19,7 +19,11 @@ function GenerateContent({ workspace }: { workspace: ReturnType<typeof useShared
   const { templates, instances, selection, loading, error, persistenceWarning, selectInstance } = workspace;
   const [selectedId, setSelectedId] = useState('');
   const [complements, setComplements] = useState<Record<string, string>>({});
-  const selected = templates.find(item => item.id === selectedId);
+  // Somente a lista carregada pela junção pode alimentar esta tela e o futuro processamento.
+  // Não recorrer à biblioteca central quando o vínculo estiver ausente.
+  const selected = !loading && !error && selection
+    ? templates.find(item => item.id === selectedId && item.user_id === workspace.userId && item.instanceIds.includes(selection.instanceId))
+    : undefined;
   const variables = selected ? [...new Set(Array.from(selected.conteudo.matchAll(/\{\{\s*(\d+)\s*\}\}/g), match => String(Number(match[1]))))] : [];
   const items = variables.map(id => ({ id, value: complements[id] ?? '' }));
 
