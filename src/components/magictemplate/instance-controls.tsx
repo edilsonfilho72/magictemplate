@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { MagicModal } from '../ui/magic-modal';
 import { Button, EmptyState, Input, Notice } from '../ui/magic-ui';
@@ -6,7 +6,10 @@ import {
   createInstance,
   deleteEmptyInstance,
   loadInstances,
+  loadInstanceTemplates,
   renameInstance,
+  type InstanceSelection,
+  type InstanceTemplate,
   type InstanceWithCount,
 } from './instance-data';
 
@@ -42,6 +45,131 @@ function errorMessage(error: unknown) {
   if (error instanceof Error) return error.message;
   if (typeof error === 'object' && error !== null && 'message' in error && typeof error.message === 'string') return error.message;
   return 'Não foi possível concluir a operação. Tente novamente.';
+}
+
+type InstanceWorkspaceState = {
+  userId: string;
+  instances: InstanceWithCount[];
+  selection: InstanceSelection | null;
+  templates: InstanceTemplate[];
+  loading: boolean;
+  error: string;
+  persistenceWarning: string;
+};
+
+function emptyWorkspace(loading = false): InstanceWorkspaceState {
+  return {
+    userId: '', instances: [], selection: null, templates: [],
+    loading, error: '', persistenceWarning: '',
+  };
+}
+
+function selectionStorageKey(userId: string) {
+  return `magictemplate:last-instance:${userId}`;
+}
+
+// Recebe o cliente já existente; não cria conexão nem substitui autenticação.
+export function useInstanceWorkspace(client: SupabaseClient) {
+  const [state, setState] = useState<InstanceWorkspaceState>(() => emptyWorkspace(true));
+  const generation = useRef(0);
+  const owner = useRef<string | null>(null);
+  const preferred = useRef<InstanceSelection | null>(null);
+
+  const refresh = useCallback(async () => {
+    const ticket = ++generation.current;
+    setState(current => ({
+      ...current, selection: null, templates: [], loading: true, error: '',
+      persistenceWarning: '',
+    }));
+
+    try {
+      const result = await loadInstances(client);
+      if (ticket !== generation.current) return;
+      let persistenceWarning = '';
+      let candidate = '';
+      if (preferred.current?.userId === result.userId) {
+        candidate = preferred.current.instanceId;
+      } else {
+        try {
+          candidate = window.localStorage.getItem(selectionStorageKey(result.userId)) ?? '';
+        } catch {
+          persistenceWarning = 'Não foi possível recuperar a última instância neste navegador. Selecione-a novamente.';
+        }
+      }
+
+      // O valor local é apenas uma preferência. A lista veio do banco,
+      // filtrada pelo usuário autenticado; IDs ausentes ou de outro dono são descartados.
+      const instance = result.instances.find(row =>
+        row.id === candidate && row.user_id === result.userId);
+      const selection = instance
+        ? { userId: result.userId, instanceId: instance.id }
+        : null;
+      // loadInstanceTemplates revalida id + proprietário antes de consultar templates.
+      const templates = selection ? await loadInstanceTemplates(client, selection) : [];
+      if (ticket !== generation.current) return;
+
+      owner.current = result.userId;
+      preferred.current = { userId: result.userId, instanceId: selection?.instanceId ?? '' };
+      try {
+        const key = selectionStorageKey(result.userId);
+        if (selection) window.localStorage.setItem(key, selection.instanceId);
+        else window.localStorage.removeItem(key);
+      } catch {
+        persistenceWarning = 'A seleção funciona nesta tela, mas não pôde ser persistida neste navegador.';
+      }
+      setState({
+        userId: result.userId,
+        instances: result.instances,
+        selection,
+        templates,
+        loading: false,
+        error: '',
+        persistenceWarning,
+      });
+    } catch (error) {
+      if (ticket !== generation.current) return;
+      setState({ ...emptyWorkspace(), error: errorMessage(error) });
+    }
+  }, [client]);
+
+  useEffect(() => {
+    let active = true;
+    owner.current = null;
+    preferred.current = null;
+    const { data } = client.auth.onAuthStateChange((_event, session) => {
+      const nextOwner = session?.user.id ?? '';
+      if (nextOwner === owner.current) return;
+      owner.current = nextOwner;
+      preferred.current = null;
+      generation.current += 1;
+      setState({
+        ...emptyWorkspace(!!nextOwner),
+        error: nextOwner ? '' : 'Entre na sua conta para acessar instâncias e templates.',
+      });
+      // Não executar chamadas Supabase dentro do callback síncrono de autenticação.
+      if (nextOwner) queueMicrotask(() => {
+        if (active) void refresh();
+      });
+    });
+    void refresh();
+    return () => {
+      active = false;
+      generation.current += 1;
+      data.subscription.unsubscribe();
+    };
+  }, [client, refresh]);
+
+  const selectInstance = useCallback((instanceId: string) => {
+    if (state.loading || !state.userId) return;
+    if (instanceId && !state.instances.some(instance =>
+      instance.id === instanceId && instance.user_id === state.userId)) return;
+    preferred.current = { userId: state.userId, instanceId };
+    // refresh limpa imediatamente a seleção e os templates anteriores.
+    // As telas consumidoras devem limpar também seus campos locais nessa troca.
+    void refresh();
+  }, [state.loading, state.userId, state.instances, refresh]);
+
+  return { ...state, selectInstance, refresh };
 }
 
 export function InstanceManager({ client, onChanged }: {
